@@ -13,6 +13,7 @@ export const DELEGATE_VALIDITY_LEDGERS = 30 * LEDGERS_PER_MINUTE;
 export const SHORT_VALIDITY_LEDGERS = LEDGERS_PER_MINUTE;
 
 export interface ScenarioContext extends ChainContext {
+  rpcUrl: string;
   master: Keypair;
   delegate: Keypair;
   smartAccountId: string;
@@ -21,8 +22,10 @@ export interface ScenarioContext extends ChainContext {
 }
 
 export function createScenarioContext(env: Record<string, string | undefined> = process.env): ScenarioContext {
+  const rpcUrl = env.RPC_URL ?? DEFAULT_RPC_URL;
   return {
-    server: new rpc.Server(env.RPC_URL ?? DEFAULT_RPC_URL),
+    rpcUrl,
+    server: new rpc.Server(rpcUrl),
     sponsor: Keypair.fromSecret(requireEnv("SPONSOR_SECRET", env)),
     master: Keypair.fromSecret(requireEnv("MASTER_SECRET", env)),
     delegate: Keypair.fromSecret(requireEnv("DELEGATE_SECRET", env)),

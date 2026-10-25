@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RuleView, StepResult } from "@poc/core";
 import type { DemoState, StepMeta } from "./api-types";
 import {
@@ -12,6 +12,10 @@ import {
   stepStatus,
   type StepStatus,
 } from "./api";
+import { CallBuilder } from "./CallBuilder";
+import { CallHistory } from "./CallHistory";
+import { useSigners } from "./hooks";
+import { PolicyEditor } from "./PolicyEditor";
 
 const STATUS_LABEL: Record<StepStatus, string> = {
   pending: "Not run",
@@ -216,6 +220,16 @@ export default function App() {
   }, []);
 
   const busy = state?.run.busy ?? false;
+
+  // On-chain signers and policy change when a job finishes, so reload them then.
+  const [signersVersion, setSignersVersion] = useState(0);
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (wasBusy.current && !busy) setSignersVersion((v) => v + 1);
+    wasBusy.current = busy;
+  }, [busy]);
+  const { data: signersData, error: signersError } = useSigners(signersVersion);
+
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => void refresh(), busy ? 2000 : 6000);
@@ -314,6 +328,13 @@ export default function App() {
               </ol>
             </section>
           )}
+
+          {signersError && <p className="error banner">{signersError}</p>}
+          <div className="grid2">
+            <PolicyEditor data={signersData} busy={busy} onApply={(policy) => void start({ action: "policy", policy })} />
+            <CallBuilder data={signersData} busy={busy} version={signersVersion} onSend={(call) => void start({ action: "call", call })} />
+          </div>
+          <CallHistory calls={state.calls} />
 
           {state.run.log.length > 0 && (
             <section className="card">

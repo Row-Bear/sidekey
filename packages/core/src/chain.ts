@@ -11,13 +11,16 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { NETWORK_PASSPHRASE } from "./config.js";
-import { ed25519SignatureScVal } from "./policy.js";
+import { ed25519SignatureScVal, type CallContext } from "./policy.js";
 
 /** Who must authorize a Soroban call: a classic G account or the smart account. */
 export type Authorizer =
   | { kind: "classic"; address: string; keypair: Keypair }
   // The smart account (C address); `keypair` is the G key that signs for it.
-  | { kind: "smart"; address: string; keypair: Keypair };
+  | { kind: "smart"; address: string; keypair: Keypair }
+  // The smart account, signed somewhere else (a wallet, a passkey). `sign` receives the base64
+  // auth-entry preimage XDR and its 32-byte hash, and returns the account's signature ScVal.
+  | { kind: "smart-remote"; address: string; sign: (preimageXdr: string, payload: Uint8Array) => Promise<xdr.ScVal> };
 
 export interface ChainContext {
   server: rpc.Server;
@@ -90,6 +93,14 @@ async function signAuthEntries(
       if (authorizer.kind === "classic") {
         return authorizeEntry(entry, authorizer.keypair, validUntilLedger, NETWORK_PASSPHRASE);
       }
+      if (authorizer.kind === "smart-remote") {
+        return authorizeEntry(
+          entry,
+          async (preimage, payload) => ({ signatureScVal: await authorizer.sign(preimage.toXDR("base64"), payload) }),
+          validUntilLedger,
+          NETWORK_PASSPHRASE,
+        );
+      }
       return authorizeEntry(
         entry,
         async (_preimage, payload) => ({
@@ -131,6 +142,50 @@ async function waitForTransaction(server: rpc.Server, hash: string): Promise<rpc
   throw new Error(`Timed out waiting for transaction ${hash}`);
 }
 
+function contractCallFunction(params: Pick<InvokeParams, "contractId" | "method" | "args">): xdr.HostFunction {
+  const { body } = new Contract(params.contractId).call(params.method, ...params.args);
+  if (body.type !== "invokeHostFunction") throw new Error("Unexpected operation body for contract call");
+  return body.invokeHostFunctionOp.hostFunction;
+}
+
+function flattenInvocation(node: xdr.SorobanAuthorizedInvocation, into: CallContext[]): void {
+  const fn = node.function;
+  if (fn.type === "sorobanAuthorizedFunctionTypeContractFn") {
+    into.push({
+      kind: "contract",
+      contract: Address.fromScAddress(fn.contractFn.contractAddress).toString(),
+      function: fn.contractFn.functionName.toString(),
+      args: fn.contractFn.args,
+    });
+  } else {
+    into.push({ kind: "other", description: "a contract deployment" });
+  }
+  for (const sub of node.subInvocations) flattenInvocation(sub, into);
+}
+
+export type RecordedAuth =
+  | { ok: true; /** Every invocation `account` is asked to authorize, root and nested. */ calls: CallContext[] }
+  | { ok: false; error: string; detail: string };
+
+/**
+ * Simulates a call (without signing or submitting anything) and returns the invocations the given
+ * smart account would have to authorize. This is the same tree its `__check_auth` receives.
+ */
+export async function recordAuthContexts(ctx: ChainContext, params: Pick<InvokeParams, "contractId" | "method" | "args">, account: string): Promise<RecordedAuth> {
+  const { server, sponsor } = ctx;
+  const recording = await server.simulateTransaction(
+    buildTransaction(await server.getAccount(sponsor.publicKey()), contractCallFunction(params), []),
+  );
+  if (rpc.Api.isSimulationError(recording)) {
+    return { ok: false, error: errorText(recording.error), detail: recording.error };
+  }
+  const calls: CallContext[] = [];
+  for (const entry of recording.result?.auth ?? []) {
+    if (credentialAddress(entry) === account) flattenInvocation(entry.rootInvocation, calls);
+  }
+  return { ok: true, calls };
+}
+
 /**
  * Invokes a contract function. The sponsor is the transaction source and pays all fees.
  * Auth is recorded by a first simulation, signed by the given authorizers, then verified
@@ -138,9 +193,7 @@ async function waitForTransaction(server: rpc.Server, hash: string): Promise<rpc
  */
 export async function invoke(ctx: ChainContext, params: InvokeParams): Promise<InvokeResult> {
   const { server, sponsor } = ctx;
-  const { body } = new Contract(params.contractId).call(params.method, ...params.args);
-  if (body.type !== "invokeHostFunction") throw new Error("Unexpected operation body for contract call");
-  const hostFunction = body.invokeHostFunctionOp.hostFunction;
+  const hostFunction = contractCallFunction(params);
 
   const recording = await server.simulateTransaction(
     buildTransaction(await server.getAccount(sponsor.publicKey()), hostFunction, []),

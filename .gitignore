@@ -24,9 +24,13 @@ web/dist/
 
 # Rust and Soroban build output
 /target/
+spikes/**/target/
 *.wasm
 .stellar/
 test_snapshots/
+
+# Local history of custom calls from the dashboard
+demo-calls.json
 
 # Editors and operating systems
 .DS_Store

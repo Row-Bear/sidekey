@@ -58,7 +58,10 @@ export function ed25519SignatureScVal(rawPublicKey: Uint8Array, signature: Uint8
 
 // ---- Decoding what the contract returns, in a JSON-safe shape for the UI ----
 
-export type ArgConstraintView = { kind: "any" } | { kind: "self" } | { kind: "exact"; display: string };
+export type ArgConstraintView =
+  | { kind: "any" }
+  | { kind: "self" }
+  | { kind: "exact"; display: string; /** XDR of the required value, hex-encoded. */ xdrHex: string };
 
 export interface RuleView {
   contract: string;
@@ -85,7 +88,9 @@ function parseConstraint(native: unknown): ArgConstraintView {
   const [name, payload] = native as [string, Uint8Array | undefined];
   if (name === "Any") return { kind: "any" };
   if (name === "SelfAddress") return { kind: "self" };
-  if (name === "Exact" && payload) return { kind: "exact", display: describeExact(payload) };
+  if (name === "Exact" && payload) {
+    return { kind: "exact", display: describeExact(payload), xdrHex: Buffer.from(payload).toString("hex") };
+  }
   throw new Error(`Unknown argument constraint ${String(name)}`);
 }
 
@@ -109,4 +114,76 @@ export function parseSignerPolicy(native: unknown): SignerPolicyView {
 export function describeRule(rule: RuleView): string {
   const args = rule.args.map((a) => (a.kind === "self" ? "this account" : a.kind === "any" ? "any" : `= ${a.display}`));
   return `${rule.function}(${args.join(", ")})`;
+}
+
+// ---- Previewing a call against a signer's policy (mirrors the contract's checks) ----
+
+/** One invocation that the smart account is asked to authorize. */
+export type CallContext =
+  | { kind: "contract"; contract: string; function: string; args: xdr.ScVal[] }
+  // Contract deployments and other host functions; a delegate can never authorize these.
+  | { kind: "other"; description: string };
+
+export type Verdict =
+  | { allowed: true }
+  | { allowed: false; error: "UnknownSigner" | "SignerExpired" | "NotAllowed"; reason: string };
+
+function addressOf(value: xdr.ScVal): string | null {
+  try {
+    return Address.fromScVal(value).toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Why `args` do not satisfy `rule`, or null when they do. */
+function mismatch(rule: RuleView, args: xdr.ScVal[], account: string): string | null {
+  if (rule.args.length !== args.length) {
+    return `${rule.function}() is allowed with ${rule.args.length} argument(s), this call has ${args.length}`;
+  }
+  for (const [i, constraint] of rule.args.entries()) {
+    if (constraint.kind === "self" && addressOf(args[i]) !== account) {
+      return `argument ${i + 1} must be this account`;
+    }
+    if (constraint.kind === "exact" && Buffer.from(args[i].toXDR()).toString("hex") !== constraint.xdrHex) {
+      return `argument ${i + 1} must equal ${constraint.display}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Evaluates what the contract's `__check_auth` would decide for a non-master signer. The master
+ * is always allowed and needs no evaluation. This is a preview; the on-chain check is authoritative.
+ */
+export function evaluateCalls(
+  policy: SignerPolicyView | null,
+  calls: CallContext[],
+  account: string,
+  latestLedger: number,
+): Verdict {
+  const deny = (error: "UnknownSigner" | "SignerExpired" | "NotAllowed", reason: string): Verdict => ({
+    allowed: false,
+    error,
+    reason,
+  });
+  if (policy === null) return deny("UnknownSigner", "this signer is not registered on the account");
+  if (policy.validUntilLedger !== null && latestLedger > policy.validUntilLedger) {
+    return deny("SignerExpired", `this signer expired at ledger ${policy.validUntilLedger}`);
+  }
+
+  for (const call of calls) {
+    if (call.kind === "other") return deny("NotAllowed", `${call.description} cannot be authorized by a delegate`);
+    if (call.contract === account) return deny("NotAllowed", "a delegate cannot authorize calls on the account itself");
+
+    const sameFunction = policy.rules.filter((r) => r.contract === call.contract && r.function === call.function);
+    if (sameFunction.length === 0) {
+      return deny("NotAllowed", `no rule allows ${call.function}() on ${call.contract}`);
+    }
+    const reasons = sameFunction.map((rule) => mismatch(rule, call.args, account));
+    if (!reasons.includes(null)) {
+      return deny("NotAllowed", `${call.function}() is allowed, but ${reasons[0]}`);
+    }
+  }
+  return { allowed: true };
 }

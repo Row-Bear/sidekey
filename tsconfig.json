@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["packages/*/src", "scripts"]
+  "include": ["packages/*/src", "scripts", "spikes"]
 }

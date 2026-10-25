@@ -1,4 +1,4 @@
-import type { SignerPolicyView, Snapshot, StepResult } from "@poc/core";
+import type { CallRecord, CallRequest, PolicyOp, SignerPolicyView, Snapshot, StepResult } from "@poc/core";
 
 export interface StepMeta {
   n: number;
@@ -26,6 +26,8 @@ export interface DemoState {
   readError?: string;
   steps: StepMeta[];
   results: Record<string, StepResult>;
+  /** Calls made from the call builder and policy edits, newest first. */
+  calls: CallRecord[];
   run: {
     busy: boolean;
     /** The step being executed right now, if any. */
@@ -40,4 +42,6 @@ export interface DemoState {
 export type RunRequest =
   | { action: "full" }
   | { action: "fresh" }
-  | { action: "steps"; from: number; to: number };
+  | { action: "steps"; from: number; to: number }
+  | { action: "call"; call: CallRequest }
+  | { action: "policy"; policy: PolicyOp };

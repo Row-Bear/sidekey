@@ -1,0 +1,169 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CallRequest, PreviewResult, SignerView } from "@poc/core";
+import { expiryText, requestPreview, shortAddress, type SignersResponse } from "./api";
+import { ArgInput } from "./ArgInput";
+import { useContractFunctions, useDebounced } from "./hooks";
+
+function signerOptionLabel(signer: SignerView, latestLedger: number): string {
+  if (signer.label === "master") return `master ${shortAddress(signer.address)}: may authorize anything`;
+  const policy = signer.policy;
+  const state = !signer.registered
+    ? "not registered"
+    : policy?.validUntilLedger == null
+      ? "no expiry"
+      : latestLedger > policy.validUntilLedger
+        ? "expired"
+        : expiryText(policy.validUntilLedger, latestLedger);
+  return `${signer.label} ${shortAddress(signer.address)}: ${state}${signer.hasKey ? "" : " (no key in demo mode)"}`;
+}
+
+function PreviewBox({ preview }: { preview: PreviewResult | "loading" | null }) {
+  if (preview === null) return <div className="verdict muted">Choose a function to preview the policy check.</div>;
+  if (preview === "loading") return <div className="verdict muted">Checking the policy…</div>;
+  const tree = preview.status === "allowed" || preview.status === "rejected" ? preview.tree : [];
+  const heading = {
+    allowed: "✓ Allowed by the signer's policy",
+    rejected: "✗ Would be rejected by the policy",
+    "simulation-failed": "The call itself would fail",
+    invalid: "Check the inputs",
+  }[preview.status];
+  return (
+    <div className={`verdict ${preview.status}`}>
+      <strong>{heading}</strong>
+      <div>{preview.message}</div>
+      {tree.length > 0 && (
+        <details>
+          <summary>Calls the account must authorize ({tree.length})</summary>
+          <ul>{tree.map((line) => <li key={line}><code>{line}</code></li>)}</ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+export function CallBuilder({ data, busy, version, onSend }: {
+  data: SignersResponse | null;
+  busy: boolean;
+  /** Bumps when on-chain state may have changed, so the preview refreshes. */
+  version: number;
+  onSend: (call: CallRequest) => void;
+}) {
+  const simulator = data?.simulator ?? "";
+  const account = data?.smartAccount ?? "";
+  const [contract, setContract] = useState("");
+  const [fnName, setFnName] = useState("");
+  const [args, setArgs] = useState<string[]>([]);
+  const [signerId, setSignerId] = useState("");
+  const [preview, setPreview] = useState<PreviewResult | "loading" | null>(null);
+  const presetArgs = useRef<string[] | null>(null);
+
+  useEffect(() => {
+    if (simulator && contract === "") setContract(simulator);
+  }, [simulator, contract]);
+  useEffect(() => {
+    if (data && signerId === "") setSignerId(data.signers.find((s) => s.label === "delegate")?.id ?? "master");
+  }, [data, signerId]);
+
+  const { functions, loading, error } = useContractFunctions(contract);
+  useEffect(() => {
+    if (!functions.some((f) => f.name === fnName)) setFnName(functions[0]?.name ?? "");
+  }, [functions, fnName]);
+
+  const fn = functions.find((f) => f.name === fnName) ?? null;
+  useEffect(() => {
+    setArgs(presetArgs.current ?? (fn?.args ?? []).map(() => ""));
+    presetArgs.current = null;
+  }, [fn?.name, contract]);
+
+  const signer = data?.signers.find((s) => s.id === signerId) ?? null;
+  const request: CallRequest | null = fn && signerId ? { contract: contract.trim(), function: fn.name, args, signer: signerId } : null;
+  const requestKey = useDebounced(JSON.stringify(request), 700);
+
+  useEffect(() => {
+    if (requestKey === "null") return setPreview(null);
+    let cancelled = false;
+    setPreview("loading");
+    requestPreview(JSON.parse(requestKey) as CallRequest)
+      .then((result) => !cancelled && setPreview(result))
+      .catch((err) => !cancelled && setPreview({ status: "invalid", message: err instanceof Error ? err.message : String(err) }));
+    return () => {
+      cancelled = true;
+    };
+  }, [requestKey, version]);
+
+  const example = useMemo(
+    () => [
+      { label: "claim(this account)", fn: "claim", args: [account] },
+      { label: "withdraw(this account, 1 XLM)", fn: "withdraw", args: [account, "10000000"] },
+    ],
+    [account],
+  );
+  const applyExample = (e: { fn: string; args: string[] }) => {
+    presetArgs.current = e.args;
+    setContract(simulator);
+    setFnName(e.fn);
+    setArgs(e.args);
+  };
+
+  const rejected = preview !== null && preview !== "loading" && preview.status === "rejected";
+  const canSend = !busy && request !== null && signer?.hasKey === true;
+
+  return (
+    <section className="card">
+      <h2>Call builder</h2>
+      <p className="muted small">
+        Pick a signer and a call. The policy check below runs the real simulation and tests every call the account
+        would have to authorize, without sending anything.
+      </p>
+      <div className="chips">
+        <span className="muted small">Examples:</span>
+        {example.map((e) => (
+          <button key={e.label} type="button" className="chip" disabled={!simulator} onClick={() => applyExample(e)}>
+            {e.label}
+          </button>
+        ))}
+      </div>
+
+      <label className="field">
+        <span className="field-label">Signer</span>
+        <select value={signerId} onChange={(e) => setSignerId(e.target.value)} disabled={!data}>
+          {data?.signers.map((s) => (
+            <option key={s.id} value={s.id} disabled={!s.hasKey}>{signerOptionLabel(s, data.latestLedger)}</option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field">
+        <span className="field-label">Contract id</span>
+        <input value={contract} onChange={(e) => setContract(e.target.value)} spellCheck={false} placeholder="C…" />
+        {error && <span className="error small">{error}</span>}
+      </label>
+
+      <label className="field">
+        <span className="field-label">Function {loading && <span className="muted">(loading…)</span>}</span>
+        <select value={fnName} onChange={(e) => setFnName(e.target.value)} disabled={functions.length === 0}>
+          {functions.map((f) => <option key={f.name} value={f.name}>{f.name}({f.args.map((a) => a.name).join(", ")})</option>)}
+        </select>
+      </label>
+
+      {fn?.args.map((arg, i) => (
+        <ArgInput
+          key={`${contract}.${fn.name}.${arg.name}`}
+          arg={arg}
+          value={args[i] ?? ""}
+          onChange={(value) => setArgs((current) => current.map((v, j) => (j === i ? value : v)))}
+          account={account}
+        />
+      ))}
+
+      <PreviewBox preview={preview} />
+
+      <div className="actions">
+        <button disabled={!canSend} onClick={() => request && onSend(request)}>
+          {busy ? "Working…" : rejected ? "Send anyway (expect a rejection)" : "Send"}
+        </button>
+        {signer && !signer.hasKey && <span className="muted small">This demo holds no key for that signer.</span>}
+      </div>
+    </section>
+  );
+}

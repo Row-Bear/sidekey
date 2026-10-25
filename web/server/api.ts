@@ -5,14 +5,26 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import {
+  type CallRequest,
+  clearCallHistory,
   clearResults,
+  type ConstraintInput,
+  contractFunctions,
   CORE_STEP_COUNT,
   createFreshDemoAccount,
   createScenarioContext,
+  type ExpiryInput,
   latestLedger,
+  listSigners,
+  loadCallHistory,
   loadResults,
+  type PolicyOp,
+  previewCall,
   readDelegatePolicy,
+  runCall,
+  runPolicyOp,
   runStep,
+  saveCallRecord,
   saveResult,
   snapshot,
   STEPS,
@@ -35,20 +47,71 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   return text ? JSON.parse(text) : {};
 }
 
+const isText = (v: unknown): v is string => typeof v === "string";
+
+/** Rebuilds a call request from untrusted JSON, keeping only the known fields. */
+function parseCallRequest(body: unknown): CallRequest {
+  const c = (body ?? {}) as Record<string, unknown>;
+  if (isText(c.contract) && isText(c.function) && isText(c.signer) && Array.isArray(c.args) && c.args.every(isText)) {
+    return { contract: c.contract, function: c.function, signer: c.signer, args: [...c.args] };
+  }
+  throw new Error("Invalid call: expected contract, function and signer as text and args as a list of text");
+}
+
+function parseExpiry(value: unknown): ExpiryInput | undefined {
+  if (value === undefined) return undefined;
+  const e = value as Record<string, unknown>;
+  if (e?.kind === "none") return { kind: "none" };
+  if (e?.kind === "minutes" && typeof e.minutes === "number") return { kind: "minutes", minutes: e.minutes };
+  if (e?.kind === "ledger" && typeof e.ledger === "number") return { kind: "ledger", ledger: e.ledger };
+  throw new Error('Invalid expiry: expected {kind:"none"}, {kind:"minutes",minutes} or {kind:"ledger",ledger}');
+}
+
+function parsePolicyOp(body: unknown): PolicyOp {
+  const p = (body ?? {}) as Record<string, unknown>;
+  if (!isText(p.signer)) throw new Error("Invalid policy edit: signer is required");
+  switch (p.op) {
+    case "allow": {
+      const constraints = p.constraints;
+      const valid = Array.isArray(constraints) && constraints.every((c) =>
+        c && ["any", "self", "exact"].includes(c.kind) && (c.value === undefined || isText(c.value)));
+      if (!isText(p.contract) || !isText(p.function) || !valid) {
+        throw new Error("Invalid policy edit: allow needs contract, function and a list of constraints");
+      }
+      const list = (constraints as ConstraintInput[]).map((c) => ({ kind: c.kind, ...(c.value !== undefined ? { value: c.value } : {}) }));
+      return { op: "allow", signer: p.signer, contract: p.contract, function: p.function, constraints: list, expiry: parseExpiry(p.expiry) };
+    }
+    case "remove-rule":
+      if (isText(p.contract) && isText(p.function)) return { op: "remove-rule", signer: p.signer, contract: p.contract, function: p.function };
+      break;
+    case "set-expiry": {
+      const expiry = parseExpiry(p.expiry);
+      if (expiry) return { op: "set-expiry", signer: p.signer, expiry };
+      break;
+    }
+    case "revoke":
+      return { op: "revoke", signer: p.signer };
+  }
+  throw new Error("Invalid policy edit");
+}
+
 function parseRunRequest(body: unknown): RunRequest {
-  const b = body as Partial<RunRequest> & { from?: unknown; to?: unknown };
+  const b = body as Partial<RunRequest> & { from?: unknown; to?: unknown; call?: unknown; policy?: unknown };
   if (b.action === "full" || b.action === "fresh") return { action: b.action };
+  if (b.action === "call") return { action: "call", call: parseCallRequest(b.call) };
+  if (b.action === "policy") return { action: "policy", policy: parsePolicyOp(b.policy) };
   if (b.action === "steps") {
     const from = Number(b.from);
     const to = Number(b.to);
     const valid = (n: number) => Number.isInteger(n) && n >= 1 && n <= STEPS.length;
     if (valid(from) && valid(to) && from <= to) return { action: "steps", from, to };
   }
-  throw new Error(`Invalid run request; expected action "full", "fresh" or "steps" with from/to in 1-${STEPS.length}`);
+  throw new Error(`Invalid run request; expected action "full", "fresh", "steps" (from/to in 1-${STEPS.length}), "call" or "policy"`);
 }
 
 export function demoApi(repoRoot: string): Plugin {
   const resultsPath = join(repoRoot, "demo-run.json");
+  const historyPath = join(repoRoot, "demo-calls.json");
   const envPath = join(repoRoot, ".env");
 
   // `.env` is the source of truth: the CLI (`npm run poc -- --fresh`) can replace the master and
@@ -83,6 +146,7 @@ export function demoApi(repoRoot: string): Plugin {
         ...(s.optional ? { optional: true } : {}),
       })),
       results: loadResults(resultsPath),
+      calls: loadCallHistory(historyPath),
       run: { ...run, log: [...run.log] },
       updatedAt: new Date().toISOString(),
     };
@@ -99,9 +163,20 @@ export function demoApi(repoRoot: string): Plugin {
 
   async function execute(request: RunRequest): Promise<void> {
     try {
+      if (request.action === "call" || request.action === "policy") {
+        const ctx = currentContext();
+        run.label = request.action === "call"
+          ? `Sending ${request.call.function}() as ${request.call.signer === "master" ? "master" : "a delegate"}`
+          : "Applying a policy edit as the master";
+        const record = request.action === "call" ? await runCall(ctx, request.call) : await runPolicyOp(ctx, request.policy);
+        saveCallRecord(historyPath, record);
+        log(`${record.title}: ${record.outcome}${record.error ? ` (${record.error})` : ""}`);
+        return;
+      }
       if (request.action === "fresh" || request.action === "full") {
         run.label = "Creating a fresh master account and smart account";
         clearResults(resultsPath);
+        clearCallHistory(historyPath);
         await createFreshDemoAccount({ repoRoot, envPath, log });
       }
       if (request.action === "fresh") return;
@@ -145,6 +220,21 @@ export function demoApi(repoRoot: string): Plugin {
         try {
           const path = (req.url ?? "/").split("?")[0];
           if (req.method === "GET" && path === "/state") return json(res, 200, await buildState());
+
+          if (req.method === "GET" && path === "/signers") {
+            const ctx = currentContext();
+            const [signers, ledger] = await Promise.all([listSigners(ctx), latestLedger(ctx)]);
+            return json(res, 200, { smartAccount: ctx.smartAccountId, simulator: ctx.simId, latestLedger: ledger, signers });
+          }
+
+          if (req.method === "GET" && path === "/contract-functions") {
+            const id = new URL(req.url ?? "", "http://localhost").searchParams.get("id") ?? "";
+            return json(res, 200, { contract: id, functions: await contractFunctions(currentContext(), id) });
+          }
+
+          if (req.method === "POST" && path === "/preview") {
+            return json(res, 200, await previewCall(currentContext(), parseCallRequest(await readBody(req))));
+          }
 
           if (req.method === "POST" && path === "/run") {
             if (run.busy) return json(res, 409, { error: "A run is already in progress" });

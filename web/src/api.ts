@@ -1,4 +1,4 @@
-import type { RuleView, StepResult } from "@poc/core";
+import type { CallRequest, FunctionInfo, PreviewResult, RuleView, SignerView, StepResult } from "@poc/core";
 import type { DemoState, RunRequest } from "./api-types";
 
 export async function fetchState(): Promise<DemoState> {
@@ -6,6 +6,35 @@ export async function fetchState(): Promise<DemoState> {
   if (!res.ok) throw new Error(`State request failed (${res.status})`);
   return (await res.json()) as DemoState;
 }
+
+export interface SignersResponse {
+  smartAccount: string;
+  simulator: string;
+  latestLedger: number;
+  signers: SignerView[];
+}
+
+async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  const body = (await res.json()) as T & { error?: string };
+  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+  return body;
+}
+
+export const fetchSigners = () => getJson<SignersResponse>("/api/signers");
+
+export async function fetchFunctions(contract: string): Promise<FunctionInfo[]> {
+  return (await getJson<{ functions: FunctionInfo[] }>(`/api/contract-functions?id=${encodeURIComponent(contract)}`)).functions;
+}
+
+export const requestPreview = (call: CallRequest) =>
+  getJson<PreviewResult>("/api/preview", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(call),
+  });
+
+export const looksLikeContractId = (text: string) => /^C[A-Z2-7]{55}$/.test(text.trim());
 
 export async function startRun(request: RunRequest): Promise<void> {
   const res = await fetch("/api/run", {
