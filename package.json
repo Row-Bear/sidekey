@@ -14,7 +14,8 @@
     "build:contract": "stellar contract build",
     "test:contract": "cargo test -p smart-account",
     "deploy:account": "tsx scripts/02-deploy-smart-account.ts",
-    "poc": "tsx scripts/03-run-poc.ts"
+    "poc": "tsx scripts/03-run-poc.ts",
+    "export:run": "tsx scripts/04-export-run.ts"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^17.4.0",

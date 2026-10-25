@@ -1,68 +1,143 @@
-# Stellar Smart Account POC
+# Stellar Smart Account PoC
 
-A proof of concept for a Soroban smart account with a default Stellar `G...`
-signer and a deny-by-default authorization policy. The account should authorize
-only explicitly allowed function calls on explicitly allowed contract
-addresses; every other call must be rejected.
+A proof of concept for a Soroban smart account on Stellar **testnet**. Its default
+signer is a Stellar `G...` key (the *master*). A second key (the *delegate*) is
+named in a signing policy that allows only specific functions on specific
+contracts; everything else is refused.
 
-## Intended behavior
+The demo account holds XLM, deposits it into a simulated yield-bearing protocol,
+and shows the delegate can `claim()` the yield but cannot `withdraw()` the funds,
+while the master can do both.
 
-- Start with one configured Ed25519 signer represented by a Stellar `G...`
-  address.
-- Authenticate that signer in the account's `__check_auth` implementation.
-- Evaluate the Soroban authorization context against an explicit allowlist of
-  `(contract address, function name)` pairs.
-- Reject calls that do not match the allowlist, including unlisted calls in
-  nested invocations. An empty or missing policy must not authorize calls.
+## How it works
 
-This describes the POC goal, not implemented or audited behavior. The signer
-encoding, policy administration, and exact authorization-context traversal
-remain to be specified and tested.
+- **Smart account** (`contracts/smart-account`, Rust/Soroban): a custom account
+  contract implementing `__check_auth`.
+  - A valid ed25519 signature from the master authorizes any call.
+  - A delegate is authorized only if **every** invocation in the authorized tree
+    matches one of its rules `(contract, function, self_arg)`. With `self_arg`
+    set, the call's first argument must be the account itself, so the delegate
+    can `claim(user)` only for this account.
+  - Anything else fails closed with `NotAllowed`: other functions or contracts,
+    smuggled sub-invocations, contract deployments, calls on the account itself,
+    and signers with no policy.
+  - Only the master can change policy (`add_policy` / `remove_policy` need the
+    account's own auth).
+- **Fee sponsor**: a separate funded G account is the transaction source and
+  pays all fees. The smart account only authorizes.
+- **Signing flow** (`packages/core/src/chain.ts`): simulate to record the auth,
+  sign the auth entry with the master or delegate key, simulate again in
+  enforcing mode, then submit. A policy violation therefore fails before
+  anything is submitted.
+- **Yield simulator** (testnet): `CDGOE4WK2MAL2U2VFIFPVGIAWNZU5A2KJ5FJTJ7GMXVNS2GGWK4N33DL`,
+  with `deposit(user, amount)`, `claim(user)` and `withdraw(user, amount)`.
+  Its deposit asset is native XLM.
 
-## Project status
+## The 7-step scenario
 
-Workspace initialized; contract implementation and tests have not been added.
-Soroban smart contracts are written in Rust. The local Python environment is
-available for future scripts or supporting tools; it is not the contract
-runtime or build toolchain.
+| # | Step | Signer | Expected |
+|---|------|--------|----------|
+| 1 | Set policy: delegate may `claim()` on the simulator, for the account itself | master | succeeds |
+| 2 | Send 9,500 XLM to the smart account | master | succeeds |
+| 3 | `deposit()` all XLM into the simulator | master | succeeds |
+| 4 | `claim()` | master | succeeds |
+| 5 | `claim()` | delegate | succeeds |
+| 6 | `withdraw()` | delegate | rejected by the policy |
+| 7 | `withdraw()` | master | succeeds |
 
-## Python environment
+A recorded run with transaction links is in [docs/recorded-run.md](docs/recorded-run.md).
 
-This workspace is pinned to Python 3.14.2 using pyenv and a project virtualenv
-named `stellar-smart-account-poc-3.14.2`.
+## Prerequisites
+
+- Rust with the `wasm32v1-none` target, and the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) (28+)
+- Node.js 24+
+- Optional: the pinned pyenv environment (`stellar-smart-account-poc-3.14.2`) for
+  any future Python tooling. It is not used by the contract or the demo.
+
+## Quick start
 
 ```sh
-pyenv install 3.14.2
-pyenv virtualenv 3.14.2 stellar-smart-account-poc-3.14.2
-pyenv local stellar-smart-account-poc-3.14.2
-python --version
+npm install
+npm run test:contract      # 16 contract unit tests
+npm run build:contract     # builds the wasm
+
+npm run setup:accounts     # creates and funds the sponsor and master; creates the delegate key
+npm run deploy:account     # optional: deploys a smart account for --only/--from runs (--fresh deploys its own)
+
+npm run poc -- --fresh     # runs all 7 steps on a fresh account
+npm run web                # dashboard at http://localhost:5173
 ```
 
-If the named virtualenv already exists, skip the `pyenv virtualenv` command.
-Install Python tooling into this environment as the project adds dependencies.
+Secrets are written to `.env` (gitignored, testnet keys only). `.env.example`
+lists every variable.
 
-## Stellar references
+### Command reference
+
+| Command | What it does |
+|---|---|
+| `npm run poc -- --fresh` | New master and smart account, then all 7 steps |
+| `npm run poc -- --only N` / `--from N --to M` | Run selected steps on the current account |
+| `npm run web` | Dashboard with live balances, policy, timeline and a **Run full demo** button |
+| `npm run export:run` | Writes `docs/recorded-run.md` from `demo-run.json` |
+| `npm run typecheck` | Typechecks the Node code and the web app |
+
+`--fresh` and **Run full demo** replace `MASTER_*` and `SMART_ACCOUNT_ID` in
+`.env`; the previous master secret is not kept, so funds left on an older smart
+account become unreachable. A full run takes about a minute.
+
+## Demo script (about 3 minutes)
+
+1. **Set the scene.** "A smart account whose default signer is a normal Stellar
+   G key, plus a policy that lets a second key do only specific things." Open
+   the dashboard and point at the policy table: master can do anything, the
+   delegate can only `claim()` on the simulator, for this account.
+2. **Run it.** Click **Run full demo**. Narrate as the timeline fills in: a fresh
+   account is created, the policy is set, 9,500 XLM is sent in and deposited.
+   Note that a separate sponsor account pays every fee.
+3. **Delegate succeeds.** Steps 4 and 5: the master claims, then the delegate
+   claims. Balances move on the dashboard.
+4. **Delegate is blocked.** Step 6, the key moment: the delegate tries
+   `withdraw()`. It is refused before submission with `NotAllowed (#3)` from the
+   account's own `__check_auth`. Nothing moves.
+5. **Master withdraws.** Step 7: the master withdraws everything. The funds are
+   back in the account.
+6. **If testnet misbehaves**, show [docs/recorded-run.md](docs/recorded-run.md);
+   the dashboard also keeps showing the last results from `demo-run.json`.
+
+## Repository layout
+
+```
+contracts/smart-account/   Soroban smart account + unit tests
+packages/core/             shared TypeScript: chain helpers, scenario, fresh-account setup
+scripts/                   01 setup accounts, 02 deploy, 03 run PoC, 04 export recorded run
+web/                       Vite + React dashboard; web/server/api.ts runs the demo server-side
+docs/recorded-run.md       recorded testnet run
+PLAN.md                    development plan and status
+```
+
+## Limitations and security notes
+
+This is a hackathon PoC, not audited, and testnet only.
+
+- One master key with no rotation or recovery; ed25519 signatures only.
+- Policy is a flat allowlist: no expiry, spend limits or per-argument checks
+  beyond `self_arg`.
+- The contract extends its own storage lifetime to about 30 days on deploy and on
+  `add_policy` only; a long-idle account would need its TTL extended.
+- The dashboard's run endpoint is a dev-server feature that holds testnet
+  secrets server side. Do not expose it publicly.
+
+## References
 
 - [Soroban contract accounts and custom authorization](https://developers.stellar.org/docs/learn/fundamentals/contract-development/authorization#contract-account)
-- [Stellar custom authentication and authorization tutorial](https://developers.stellar.org/docs/build/guides/auth/check-auth-tutorials#custom-authentication-and-authorization)
-- [Soroban complex account example](https://developers.stellar.org/docs/build/smart-contracts/example-contracts/complex-account)
+- [Custom authentication and authorization tutorial](https://developers.stellar.org/docs/build/guides/auth/check-auth-tutorials#custom-authentication-and-authorization)
+- [Complex account example](https://developers.stellar.org/docs/build/smart-contracts/example-contracts/complex-account)
 
 ### Prior art
 
 Raven's Stellar repository index surfaced [SocketFi's Soroban smart account](https://github.com/Socket-Fi/socketfi-smart-account)
 and [Crossmint's Stellar smart account](https://github.com/Crossmint/stellar-smart-account)
-on 2026-10-25. A source scan of SocketFi (scanned 2026-09-16, Soroban SDK
-`=25.3.1`) found signer/auth-context handling and session policies. This is
-adjacent prior art, not evidence that its policies implement this POC's exact
-contract-and-function allowlist. Neither repository has been audited as part
-of this setup.
-
-## Initial acceptance criteria
-
-- A valid signature from the configured `G...` signer authorizes an allowlisted
-  contract/function pair.
-- A call to an unlisted function or contract is rejected.
-- An allowed outer call cannot smuggle an unlisted nested invocation.
-- Invalid signatures, unknown authorization contexts, and an empty policy fail
-  closed.
-- Tests cover both permitted and rejected paths before testnet deployment.
+on 2026-10-25. SocketFi (source scan 2026-09-16, Soroban SDK `=25.3.1`) has
+signer and auth-context handling with session policies. This is adjacent prior
+art, not an implementation of this POC's exact contract-and-function allowlist,
+and neither repository has been audited as part of this project.

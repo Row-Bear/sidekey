@@ -155,8 +155,11 @@ fallback if live testnet misbehaves.
       first (`createFreshDemoAccount`), updating `.env` and clearing `demo-run.json`.
       Each fresh account replaces `MASTER_*` and `SMART_ACCOUNT_ID` in `.env`; the previous
       master secret is not kept, so funds left on an older smart account are unreachable.
-- [ ] Write a short demo script; update `.readme` with run instructions.
-- [ ] Capture a recorded run (tx hashes) as a fallback.
+- [x] Write a short demo script; update `.readme` with run instructions. The `.readme`
+      now has the overview, command reference, a 3-minute demo script, layout and limitations.
+- [x] Capture a recorded run (tx hashes) as a fallback: `docs/recorded-run.md`, exported
+      with `npm run export:run` from a clean `npm run poc -- --fresh` run (all 7 steps
+      as expected on one fresh account).
 - [ ] Stretch: policy expiry or per-delegate spend limit.
 
 ## Risks

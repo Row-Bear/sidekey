@@ -1,6 +1,9 @@
 import "dotenv/config";
-import { createScenarioContext, runStep, saveResult, STEPS } from "@poc/core";
+import { fileURLToPath } from "node:url";
+import { clearResults, createFreshDemoAccount, createScenarioContext, runStep, saveResult, STEPS } from "@poc/core";
 
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const ENV_PATH = fileURLToPath(new URL("../.env", import.meta.url));
 const RESULTS_PATH = new URL("../demo-run.json", import.meta.url);
 
 const xlm = (stroops: string) => (Number(BigInt(stroops)) / 1e7).toFixed(4);
@@ -18,6 +21,17 @@ function parseSteps(args: string[]): number[] {
 }
 
 async function main(): Promise<void> {
+  // --fresh: new master account and smart account first, so the full 7 steps can be repeated.
+  if (process.argv.includes("--fresh")) {
+    clearResults(RESULTS_PATH);
+    const { master, smartAccountId } = await createFreshDemoAccount({
+      repoRoot: ROOT,
+      envPath: ENV_PATH,
+      log: (message) => console.log(`   ${message}`),
+    });
+    console.log(`Fresh run: master ${master}, smart account ${smartAccountId}`);
+  }
+
   const ctx = createScenarioContext();
   let allAsExpected = true;
 

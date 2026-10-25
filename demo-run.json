@@ -6,8 +6,8 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "96a9bd7afaf854c95869552de34880125c0236d31938eda455b97d7c69b563b5",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/96a9bd7afaf854c95869552de34880125c0236d31938eda455b97d7c69b563b5",
+    "txHash": "c0003c80ed26522555d3ab4e88cf1c3da598e3623b137e0d9c178c4f31bbf0ae",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/c0003c80ed26522555d3ab4e88cf1c3da598e3623b137e0d9c178c4f31bbf0ae",
     "before": {
       "accountXlm": "0",
       "deposited": "0",
@@ -18,7 +18,7 @@
       "deposited": "0",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T21:30:34.035Z"
+    "at": "2026-10-25T21:45:03.921Z"
   },
   "2": {
     "step": 2,
@@ -27,8 +27,8 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "806c27943d4d742f1dab5fd10e34858fff1efdd2f3e277b871df40f2e37fdd12",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/806c27943d4d742f1dab5fd10e34858fff1efdd2f3e277b871df40f2e37fdd12",
+    "txHash": "8182fa305d0af6fa301dc014651facd9238055bd7fb46d152006cc4931e12478",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/8182fa305d0af6fa301dc014651facd9238055bd7fb46d152006cc4931e12478",
     "before": {
       "accountXlm": "0",
       "deposited": "0",
@@ -39,7 +39,7 @@
       "deposited": "0",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T21:31:33.633Z"
+    "at": "2026-10-25T21:45:08.122Z"
   },
   "3": {
     "step": 3,
@@ -48,8 +48,8 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "b00a8196a779b8eedd27e00fccae894135b8b392823d38b5041eb79c338117bd",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/b00a8196a779b8eedd27e00fccae894135b8b392823d38b5041eb79c338117bd",
+    "txHash": "65602dd8f0bd67bd32f512dd998a51c7d1dcfcb75ee2941e962c3749658e923b",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/65602dd8f0bd67bd32f512dd998a51c7d1dcfcb75ee2941e962c3749658e923b",
     "note": "depositing 9,500 XLM",
     "before": {
       "accountXlm": "95000000000",
@@ -61,7 +61,7 @@
       "deposited": "95000000000",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T21:32:14.181Z"
+    "at": "2026-10-25T21:45:14.276Z"
   },
   "4": {
     "step": 4,
@@ -70,20 +70,20 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "25fca1e3eb8480d74e4471dee7e1bc422a83ccaed2c6c34d975318e47ef54b65",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/25fca1e3eb8480d74e4471dee7e1bc422a83ccaed2c6c34d975318e47ef54b65",
+    "txHash": "6bb73d210a6893a6a1498fcb0962b393a4f041294bc85417177924327ad1ab14",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/6bb73d210a6893a6a1498fcb0962b393a4f041294bc85417177924327ad1ab14",
     "note": "accrued yield before claim: 0.001 XLM",
     "before": {
       "accountXlm": "0",
       "deposited": "95000000000",
-      "accruedYield": "10000"
+      "accruedYield": "0"
     },
     "after": {
-      "accountXlm": "20000",
+      "accountXlm": "30000",
       "deposited": "95000000000",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T21:32:22.989Z"
+    "at": "2026-10-25T21:45:28.903Z"
   },
   "5": {
     "step": 5,
@@ -92,20 +92,20 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "9aff7cd88b72e2f80ea51cbc3964a570e8f61c55b22ac30b515dc5f794cc8a3f",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/9aff7cd88b72e2f80ea51cbc3964a570e8f61c55b22ac30b515dc5f794cc8a3f",
-    "note": "accrued yield before claim: 0.043 XLM",
+    "txHash": "b0f9caa2c43ecb7e89e6070b96c9b3fe6192423598ffc1abd1e7e916fa6ecdc8",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/b0f9caa2c43ecb7e89e6070b96c9b3fe6192423598ffc1abd1e7e916fa6ecdc8",
+    "note": "accrued yield before claim: 0.001 XLM",
     "before": {
-      "accountXlm": "20000",
-      "deposited": "95000000000",
-      "accruedYield": "430000"
-    },
-    "after": {
-      "accountXlm": "460000",
+      "accountXlm": "30000",
       "deposited": "95000000000",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T21:36:03.352Z"
+    "after": {
+      "accountXlm": "50000",
+      "deposited": "95000000000",
+      "accruedYield": "0"
+    },
+    "at": "2026-10-25T21:45:38.549Z"
   },
   "6": {
     "step": 6,
@@ -115,18 +115,40 @@
     "outcome": "failure",
     "asExpected": true,
     "failureStage": "enforcing-simulation",
-    "error": "smart account CD6PLOKPKQO3HF7Y7FHTILXSWPMCLPJ25XUAE2MOGTRMUPFHJO4KSRFZ rejected the signature in __check_auth: NotAllowed (#3)",
+    "error": "smart account CCSAUKV4PT4L7MBUG43ADEFZMJON6BYWLNFBLHE4JSXVE2IADYJNBDAT rejected the signature in __check_auth: NotAllowed (#3)",
     "note": "withdrawing the full deposit of 9,500 XLM",
     "before": {
-      "accountXlm": "460000",
+      "accountXlm": "50000",
       "deposited": "95000000000",
-      "accruedYield": "600000"
+      "accruedYield": "0"
     },
     "after": {
-      "accountXlm": "460000",
+      "accountXlm": "50000",
       "deposited": "95000000000",
-      "accruedYield": "610000"
+      "accruedYield": "0"
     },
-    "at": "2026-10-25T21:41:10.350Z"
+    "at": "2026-10-25T21:45:41.710Z"
+  },
+  "7": {
+    "step": 7,
+    "name": "withdraw() signed by the master G key",
+    "signer": "master",
+    "expected": "success",
+    "outcome": "success",
+    "asExpected": true,
+    "txHash": "1e510dff0f96d947cbe0d0fd82ff030f530020770fb17654d98d282bd314ef55",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/1e510dff0f96d947cbe0d0fd82ff030f530020770fb17654d98d282bd314ef55",
+    "note": "withdrawing the full deposit of 9,500 XLM",
+    "before": {
+      "accountXlm": "50000",
+      "deposited": "95000000000",
+      "accruedYield": "0"
+    },
+    "after": {
+      "accountXlm": "95000050000",
+      "deposited": "0",
+      "accruedYield": "20000"
+    },
+    "at": "2026-10-25T21:45:49.092Z"
   }
 }
