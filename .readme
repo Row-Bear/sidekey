@@ -1,0 +1,68 @@
+# Stellar Smart Account POC
+
+A proof of concept for a Soroban smart account with a default Stellar `G...`
+signer and a deny-by-default authorization policy. The account should authorize
+only explicitly allowed function calls on explicitly allowed contract
+addresses; every other call must be rejected.
+
+## Intended behavior
+
+- Start with one configured Ed25519 signer represented by a Stellar `G...`
+  address.
+- Authenticate that signer in the account's `__check_auth` implementation.
+- Evaluate the Soroban authorization context against an explicit allowlist of
+  `(contract address, function name)` pairs.
+- Reject calls that do not match the allowlist, including unlisted calls in
+  nested invocations. An empty or missing policy must not authorize calls.
+
+This describes the POC goal, not implemented or audited behavior. The signer
+encoding, policy administration, and exact authorization-context traversal
+remain to be specified and tested.
+
+## Project status
+
+Workspace initialized; contract implementation and tests have not been added.
+Soroban smart contracts are written in Rust. The local Python environment is
+available for future scripts or supporting tools; it is not the contract
+runtime or build toolchain.
+
+## Python environment
+
+This workspace is pinned to Python 3.14.2 using pyenv and a project virtualenv
+named `stellar-smart-account-poc-3.14.2`.
+
+```sh
+pyenv install 3.14.2
+pyenv virtualenv 3.14.2 stellar-smart-account-poc-3.14.2
+pyenv local stellar-smart-account-poc-3.14.2
+python --version
+```
+
+If the named virtualenv already exists, skip the `pyenv virtualenv` command.
+Install Python tooling into this environment as the project adds dependencies.
+
+## Stellar references
+
+- [Soroban contract accounts and custom authorization](https://developers.stellar.org/docs/learn/fundamentals/contract-development/authorization#contract-account)
+- [Stellar custom authentication and authorization tutorial](https://developers.stellar.org/docs/build/guides/auth/check-auth-tutorials#custom-authentication-and-authorization)
+- [Soroban complex account example](https://developers.stellar.org/docs/build/smart-contracts/example-contracts/complex-account)
+
+### Prior art
+
+Raven's Stellar repository index surfaced [SocketFi's Soroban smart account](https://github.com/Socket-Fi/socketfi-smart-account)
+and [Crossmint's Stellar smart account](https://github.com/Crossmint/stellar-smart-account)
+on 2026-10-25. A source scan of SocketFi (scanned 2026-09-16, Soroban SDK
+`=25.3.1`) found signer/auth-context handling and session policies. This is
+adjacent prior art, not evidence that its policies implement this POC's exact
+contract-and-function allowlist. Neither repository has been audited as part
+of this setup.
+
+## Initial acceptance criteria
+
+- A valid signature from the configured `G...` signer authorizes an allowlisted
+  contract/function pair.
+- A call to an unlisted function or contract is rejected.
+- An allowed outer call cannot smuggle an unlisted nested invocation.
+- Invalid signatures, unknown authorization contexts, and an empty policy fail
+  closed.
+- Tests cover both permitted and rejected paths before testnet deployment.

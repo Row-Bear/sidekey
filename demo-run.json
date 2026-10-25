@@ -1,0 +1,132 @@
+{
+  "1": {
+    "step": 1,
+    "name": "Master sets policy: delegate may call claim() on the yield simulator, for the account itself only",
+    "signer": "master",
+    "expected": "success",
+    "outcome": "success",
+    "asExpected": true,
+    "txHash": "96a9bd7afaf854c95869552de34880125c0236d31938eda455b97d7c69b563b5",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/96a9bd7afaf854c95869552de34880125c0236d31938eda455b97d7c69b563b5",
+    "before": {
+      "accountXlm": "0",
+      "deposited": "0",
+      "accruedYield": "0"
+    },
+    "after": {
+      "accountXlm": "0",
+      "deposited": "0",
+      "accruedYield": "0"
+    },
+    "at": "2026-10-25T21:30:34.035Z"
+  },
+  "2": {
+    "step": 2,
+    "name": "Master account sends 9,500 XLM to the smart account",
+    "signer": "master",
+    "expected": "success",
+    "outcome": "success",
+    "asExpected": true,
+    "txHash": "806c27943d4d742f1dab5fd10e34858fff1efdd2f3e277b871df40f2e37fdd12",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/806c27943d4d742f1dab5fd10e34858fff1efdd2f3e277b871df40f2e37fdd12",
+    "before": {
+      "accountXlm": "0",
+      "deposited": "0",
+      "accruedYield": "0"
+    },
+    "after": {
+      "accountXlm": "95000000000",
+      "deposited": "0",
+      "accruedYield": "0"
+    },
+    "at": "2026-10-25T21:31:33.633Z"
+  },
+  "3": {
+    "step": 3,
+    "name": "deposit() all XLM into the yield simulator, signed by the master G key",
+    "signer": "master",
+    "expected": "success",
+    "outcome": "success",
+    "asExpected": true,
+    "txHash": "b00a8196a779b8eedd27e00fccae894135b8b392823d38b5041eb79c338117bd",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/b00a8196a779b8eedd27e00fccae894135b8b392823d38b5041eb79c338117bd",
+    "note": "depositing 9,500 XLM",
+    "before": {
+      "accountXlm": "95000000000",
+      "deposited": "0",
+      "accruedYield": "0"
+    },
+    "after": {
+      "accountXlm": "0",
+      "deposited": "95000000000",
+      "accruedYield": "0"
+    },
+    "at": "2026-10-25T21:32:14.181Z"
+  },
+  "4": {
+    "step": 4,
+    "name": "claim() signed by the master G key",
+    "signer": "master",
+    "expected": "success",
+    "outcome": "success",
+    "asExpected": true,
+    "txHash": "25fca1e3eb8480d74e4471dee7e1bc422a83ccaed2c6c34d975318e47ef54b65",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/25fca1e3eb8480d74e4471dee7e1bc422a83ccaed2c6c34d975318e47ef54b65",
+    "note": "accrued yield before claim: 0.001 XLM",
+    "before": {
+      "accountXlm": "0",
+      "deposited": "95000000000",
+      "accruedYield": "10000"
+    },
+    "after": {
+      "accountXlm": "20000",
+      "deposited": "95000000000",
+      "accruedYield": "0"
+    },
+    "at": "2026-10-25T21:32:22.989Z"
+  },
+  "5": {
+    "step": 5,
+    "name": "claim() signed by the delegate, as named in the signing policy",
+    "signer": "delegate",
+    "expected": "success",
+    "outcome": "success",
+    "asExpected": true,
+    "txHash": "9aff7cd88b72e2f80ea51cbc3964a570e8f61c55b22ac30b515dc5f794cc8a3f",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/9aff7cd88b72e2f80ea51cbc3964a570e8f61c55b22ac30b515dc5f794cc8a3f",
+    "note": "accrued yield before claim: 0.043 XLM",
+    "before": {
+      "accountXlm": "20000",
+      "deposited": "95000000000",
+      "accruedYield": "430000"
+    },
+    "after": {
+      "accountXlm": "460000",
+      "deposited": "95000000000",
+      "accruedYield": "0"
+    },
+    "at": "2026-10-25T21:36:03.352Z"
+  },
+  "6": {
+    "step": 6,
+    "name": "withdraw() signed by the delegate is rejected by the policy",
+    "signer": "delegate",
+    "expected": "failure",
+    "outcome": "failure",
+    "asExpected": true,
+    "failureStage": "enforcing-simulation",
+    "error": "smart account CD6PLOKPKQO3HF7Y7FHTILXSWPMCLPJ25XUAE2MOGTRMUPFHJO4KSRFZ rejected the signature in __check_auth: NotAllowed (#3)",
+    "note": "withdrawing the full deposit of 9,500 XLM",
+    "before": {
+      "accountXlm": "460000",
+      "deposited": "95000000000",
+      "accruedYield": "600000"
+    },
+    "after": {
+      "accountXlm": "460000",
+      "deposited": "95000000000",
+      "accruedYield": "610000"
+    },
+    "at": "2026-10-25T21:41:10.350Z"
+  }
+}
