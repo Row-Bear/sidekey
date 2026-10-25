@@ -79,22 +79,36 @@ Suggested order is by value per hour. Each package is shippable on its own.
 - [ ] `contract.Spec` from `@stellar/stellar-sdk` can read a contract's function names and
       argument types, and encode typed inputs to `ScVal`, for the form builder.
 
-### WP1: Contract v2 with expiry (goal 1; about 3 h)
+### WP1: Contract v2 with expiry (goal 1; about 3 h) — done
 
-- [ ] Signer model, per-signer policy, `ArgConstraint` rules, `list_signers`, new errors
-      (`SignerExpired`, `InvalidPolicy` cases such as an expiry in the past or a rule with an
-      unknown arity).
-- [ ] Keep the ed25519 path as the first signature variant; add the passkey variant and
-      verification (can land in WP5 if time is short, but the enum shape should be final now).
-- [ ] Unit tests: everything the current 16 tests cover, plus expiry (valid, last valid
-      ledger, expired, master unaffected, `set_expiry` extends), each constraint kind,
-      wrong argument count, revoked signer, listing signers.
-- [ ] Update the TS signature encoder, `add_policy` calls and the scenario. Step 1 sets
-      `claim` on the simulator with `[SelfAddress]` and an expiry of about 30 minutes.
-- [ ] Optional steps 8 and 9: set a short expiry (about 1 minute), then a delegate `claim`
-      after it passes is rejected with `SignerExpired`.
-- [ ] Redeploy; rerun `npm run poc -- --fresh`; refresh `docs/recorded-run.md`.
-- Done when: the full demo passes on contract v2 and an expired delegate is refused.
+- [x] Signer model, per-signer policy, `ArgConstraint` rules, `list_signers`, new error
+      `SignerExpired`, and `InvalidPolicy` for an expiry in the past, a rule on the account
+      itself, or more than 32 rules or 16 arguments.
+- [x] `set_signer(signer, valid_until_ledger, rules)` replaces a signer's whole policy in one
+      call (so demo step 1 stays one transaction); `add_rule`, `remove_rule`, `set_expiry`
+      and `revoke_signer` edit it. `get_policy` was replaced by `get_signer`.
+- [x] Scope decision: the **passkey** signer and signature variants, and the `rp_id_hash`
+      field, are left to WP5 so no dead code ships now. `SignerId` and `AccSignature` are
+      enums, so adding a `Passkey` variant later does not change how ed25519 is encoded.
+- [x] Unit tests: 34 pass (`npm run test:contract`). They cover the v1 behaviours, plus
+      expiry (last valid ledger, expired, master unaffected, `set_expiry` extends, shortens
+      or removes, invalid past expiry), each constraint kind, wrong argument count, value
+      type confusion (u32 vs i128), revoked signer and listing signers. Mutation checks
+      (expiry disabled, expiry off-by-one, arity removed, `Exact` and `SelfAddress` always
+      true, past expiry accepted, rule on the account itself allowed) each fail the
+      intended test.
+- [x] TS encoders and decoders in `packages/core/src/policy.ts`; scenario updated. Step 1
+      sets `claim` on the simulator with `[SelfAddress]` and an expiry of about 30 minutes.
+      A step that expects a failure now also checks the failure's cause
+      (`NotAllowed` for step 6, `SignerExpired` for step 9).
+- [x] Optional steps 8 and 9: shorten the expiry to about 1 minute, then a delegate `claim`
+      after it passes is rejected with `SignerExpired`. `npm run poc -- --extended` and the
+      dashboard's **Run expiry demo** run them; **Run full demo** stays at steps 1-7.
+- [x] Dashboard shows the delegate's expiry (ledger and approximate time left, or an
+      "expired" tag) and each rule's argument constraints.
+- [x] Redeployed on testnet (wasm 12.7 KB, 10 exports); `npm run poc -- --fresh --extended`
+      and the UI's full demo plus expiry demo passed; `docs/recorded-run.md` refreshed.
+- Done when: the full demo passes on contract v2 and an expired delegate is refused. Met.
 
 ### WP2: Policy editor and call builder (goals 2 and 3; about 3 h)
 

@@ -1,4 +1,4 @@
-import type { StepResult } from "@poc/core";
+import type { RuleView, StepResult } from "@poc/core";
 import type { DemoState, RunRequest } from "./api-types";
 
 export async function fetchState(): Promise<DemoState> {
@@ -30,6 +30,22 @@ export function formatXlm(stroops: string): string {
 }
 
 export type StepStatus = "pending" | "running" | "succeeded" | "blocked" | "unexpected";
+
+// Testnet closes a ledger roughly every 5 seconds.
+const SECONDS_PER_LEDGER = 5;
+
+/** e.g. "expires in about 12 min (ledger 5,389,030)". */
+export function expiryText(validUntil: number, latest: number): string {
+  const seconds = (validUntil - latest) * SECONDS_PER_LEDGER;
+  const left = seconds < 90 ? `${Math.max(seconds, 0)} s` : `${Math.round(seconds / 60)} min`;
+  return `expires in about ${left} (ledger ${validUntil.toLocaleString("en-US")})`;
+}
+
+/** Human-readable rule, e.g. `claim(this account)` or `withdraw(this account, any)`. */
+export function describeRule(rule: RuleView): string {
+  const args = rule.args.map((a) => (a.kind === "self" ? "this account" : a.kind === "any" ? "any" : `= ${a.display}`));
+  return `${rule.function}(${args.join(", ")})`;
+}
 
 export function stepStatus(result: StepResult | undefined, running: boolean): StepStatus {
   if (running) return "running";

@@ -15,14 +15,19 @@ while the master can do both.
   contract implementing `__check_auth`.
   - A valid ed25519 signature from the master authorizes any call.
   - A delegate is authorized only if **every** invocation in the authorized tree
-    matches one of its rules `(contract, function, self_arg)`. With `self_arg`
-    set, the call's first argument must be the account itself, so the delegate
-    can `claim(user)` only for this account.
+    matches one of its rules `(contract, function, argument constraints)`. A rule
+    has one constraint per argument: any value, "this account", or an exact value.
+    So the delegate can `claim(user)` only for this account, and a call with a
+    different number of arguments never matches.
+  - Each delegate has an optional **expiry ledger**. After that ledger the signer
+    is refused (`SignerExpired`), even for calls its rules allow. The master never
+    expires.
   - Anything else fails closed with `NotAllowed`: other functions or contracts,
     smuggled sub-invocations, contract deployments, calls on the account itself,
     and signers with no policy.
-  - Only the master can change policy (`add_policy` / `remove_policy` need the
-    account's own auth).
+  - Only the master can change policy (`set_signer`, `add_rule`, `remove_rule`,
+    `set_expiry`, `revoke_signer` need the account's own auth). Views: `master`,
+    `get_signer`, `list_signers`.
 - **Fee sponsor**: a separate funded G account is the transaction source and
   pays all fees. The smart account only authorizes.
 - **Signing flow** (`packages/core/src/chain.ts`): simulate to record the auth,
@@ -33,17 +38,24 @@ while the master can do both.
   with `deposit(user, amount)`, `claim(user)` and `withdraw(user, amount)`.
   Its deposit asset is native XLM.
 
-## The 7-step scenario
+## The scenario
+
+The core demo is steps 1-7. Steps 8-9 are an optional expiry demo.
 
 | # | Step | Signer | Expected |
 |---|------|--------|----------|
-| 1 | Set policy: delegate may `claim()` on the simulator, for the account itself | master | succeeds |
+| 1 | Set policy: delegate may `claim()` on the simulator, for the account itself, for about 30 minutes | master | succeeds |
 | 2 | Send 9,500 XLM to the smart account | master | succeeds |
 | 3 | `deposit()` all XLM into the simulator | master | succeeds |
 | 4 | `claim()` | master | succeeds |
 | 5 | `claim()` | delegate | succeeds |
-| 6 | `withdraw()` | delegate | rejected by the policy |
+| 6 | `withdraw()` | delegate | rejected by the policy (`NotAllowed`) |
 | 7 | `withdraw()` | master | succeeds |
+| 8 | Shorten the delegate's expiry to about 1 minute (optional) | master | succeeds |
+| 9 | `claim()` after the expiry (optional) | delegate | rejected (`SignerExpired`) |
+
+A step that expects a failure only passes if it fails with that specific error, so an
+unrelated failure cannot make it look correct.
 
 A recorded run with transaction links is in [docs/recorded-run.md](docs/recorded-run.md).
 
@@ -58,7 +70,7 @@ A recorded run with transaction links is in [docs/recorded-run.md](docs/recorded
 
 ```sh
 npm install
-npm run test:contract      # 16 contract unit tests
+npm run test:contract      # 34 contract unit tests
 npm run build:contract     # builds the wasm
 
 npm run setup:accounts     # creates and funds the sponsor and master; creates the delegate key
@@ -75,7 +87,7 @@ lists every variable.
 
 | Command | What it does |
 |---|---|
-| `npm run poc -- --fresh` | New master and smart account, then all 7 steps |
+| `npm run poc -- --fresh` | New master and smart account, then steps 1-7 (add `--extended` for the expiry steps 8-9) |
 | `npm run poc -- --only N` / `--from N --to M` | Run selected steps on the current account |
 | `npm run web` | Dashboard with live balances, policy, timeline and a **Run full demo** button |
 | `npm run export:run` | Writes `docs/recorded-run.md` from `demo-run.json` |
@@ -102,7 +114,10 @@ account become unreachable. A full run takes about a minute.
    account's own `__check_auth`. Nothing moves.
 5. **Master withdraws.** Step 7: the master withdraws everything. The funds are
    back in the account.
-6. **If testnet misbehaves**, show [docs/recorded-run.md](docs/recorded-run.md);
+6. **Optional: expiry.** Click **Run expiry demo**. The master shortens the
+   delegate's expiry to about a minute; once the ledger passes it, the delegate's
+   otherwise-allowed `claim()` is refused with `SignerExpired (#5)`. Takes about a minute.
+7. **If testnet misbehaves**, show [docs/recorded-run.md](docs/recorded-run.md);
    the dashboard also keeps showing the last results from `demo-run.json`.
 
 ## Repository layout
@@ -121,10 +136,10 @@ PLAN.md                    development plan and status
 This is a hackathon PoC, not audited, and testnet only.
 
 - One master key with no rotation or recovery; ed25519 signatures only.
-- Policy is a flat allowlist: no expiry, spend limits or per-argument checks
-  beyond `self_arg`.
+- Policy is an allowlist with per-signer expiry and per-argument constraints; there are
+  no spend limits or rate limits.
 - The contract extends its own storage lifetime to about 30 days on deploy and on
-  `add_policy` only; a long-idle account would need its TTL extended.
+  policy changes only; a long-idle account would need its TTL extended.
 - The dashboard's run endpoint is a dev-server feature that holds testnet secrets server
   side. It binds to localhost and refuses cross-origin and non-JSON requests, but do not
   expose it publicly.

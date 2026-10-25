@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { fileURLToPath } from "node:url";
-import { clearResults, createFreshDemoAccount, createScenarioContext, runStep, saveResult, STEPS } from "@poc/core";
+import { clearResults, CORE_STEP_COUNT, createFreshDemoAccount, createScenarioContext, runStep, saveResult, STEPS } from "@poc/core";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const ENV_PATH = fileURLToPath(new URL("../.env", import.meta.url));
@@ -15,7 +15,8 @@ function parseSteps(args: string[]): number[] {
   };
   const only = flag("--only");
   const from = flag("--from") ?? 1;
-  const to = flag("--to") ?? STEPS.length;
+  // The core demo is steps 1-7; --extended also runs the optional expiry steps.
+  const to = flag("--to") ?? (args.includes("--extended") ? STEPS.length : CORE_STEP_COUNT);
   if (only !== undefined) return [only];
   return Array.from({ length: to - from + 1 }, (_, i) => from + i);
 }

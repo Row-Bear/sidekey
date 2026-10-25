@@ -2,13 +2,20 @@ extern crate std;
 
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
-    auth::{Context, ContractContext, CreateContractHostFnContext, ContractExecutable},
+    auth::{Context, ContractContext, ContractExecutable, CreateContractHostFnContext},
     symbol_short,
-    testutils::Address as _,
-    vec, Address, BytesN, Env, IntoVal, InvokeError, Symbol, Val, Vec,
+    testutils::{Address as _, Ledger as _},
+    vec,
+    xdr::ToXdr,
+    Address, BytesN, Env, IntoVal, InvokeError, Symbol, Val, Vec,
 };
 
-use crate::{AccError, AccSignature, SmartAccount, SmartAccountClient};
+use crate::{
+    AccError, AccSignature, ArgConstraint, Ed25519Signature, Rule, SignerId, SignerPolicy, SmartAccount,
+    SmartAccountClient,
+};
+
+type CheckResult = Result<(), Result<AccError, InvokeError>>;
 
 struct Fixture<'a> {
     env: Env,
@@ -28,6 +35,7 @@ fn pubkey(env: &Env, key: &SigningKey) -> BytesN<32> {
 
 fn setup<'a>() -> Fixture<'a> {
     let env = Env::default();
+    env.ledger().set_sequence_number(100);
     let master = key(1);
     let delegate = key(2);
     let id = env.register(SmartAccount, (pubkey(&env, &master),));
@@ -36,39 +44,64 @@ fn setup<'a>() -> Fixture<'a> {
     Fixture { env, client, master, delegate, sim }
 }
 
-/// Authorizes the delegate to call `claim` on the simulator for itself only.
-fn allow_delegate_claim(f: &Fixture) {
+fn signer_id(f: &Fixture, key: &SigningKey) -> SignerId {
+    SignerId::Ed25519(pubkey(&f.env, key))
+}
+
+fn delegate_id(f: &Fixture) -> SignerId {
+    signer_id(f, &f.delegate)
+}
+
+/// `claim(user)` on the simulator, only for the account itself.
+fn claim_rule(f: &Fixture) -> Rule {
+    Rule {
+        contract: f.sim.clone(),
+        function: symbol_short!("claim"),
+        args: vec![&f.env, ArgConstraint::SelfAddress],
+    }
+}
+
+fn set_delegate(f: &Fixture, valid_until: Option<u32>, rules: Vec<Rule>) {
     f.env.mock_all_auths();
-    f.client
-        .add_policy(&pubkey(&f.env, &f.delegate), &f.sim, &symbol_short!("claim"), &true);
+    f.client.set_signer(&delegate_id(f), &valid_until, &rules);
+}
+
+fn allow_delegate_claim(f: &Fixture) {
+    set_delegate(f, None, vec![&f.env, claim_rule(f)]);
+}
+
+fn call_with(contract: &Address, function: Symbol, args: Vec<Val>) -> Context {
+    Context::Contract(ContractContext { contract: contract.clone(), fn_name: function, args })
 }
 
 fn call(env: &Env, contract: &Address, function: Symbol, first_arg: &Address) -> Context {
-    let args: Vec<Val> = vec![env, first_arg.into_val(env)];
-    Context::Contract(ContractContext {
-        contract: contract.clone(),
-        fn_name: function,
-        args,
+    call_with(contract, function, vec![env, first_arg.into_val(env)])
+}
+
+fn signature_for(f: &Fixture, signer: &SigningKey, payload: &BytesN<32>) -> AccSignature {
+    AccSignature::Ed25519(Ed25519Signature {
+        signer: pubkey(&f.env, signer),
+        sig: BytesN::from_array(&f.env, &signer.sign(&payload.to_array()).to_bytes()),
     })
 }
 
-fn check(
-    f: &Fixture,
-    signer: &SigningKey,
-    contexts: Vec<Context>,
-) -> Result<(), Result<AccError, InvokeError>> {
+fn check(f: &Fixture, signer: &SigningKey, contexts: Vec<Context>) -> CheckResult {
     let payload = BytesN::from_array(&f.env, &[7u8; 32]);
-    let sig = AccSignature {
-        signer: pubkey(&f.env, signer),
-        sig: BytesN::from_array(&f.env, &signer.sign(&payload.to_array()).to_bytes()),
-    };
+    let signature = signature_for(f, signer, &payload);
     f.env.try_invoke_contract_check_auth::<AccError>(
         &f.client.address,
         &payload,
-        sig.into_val(&f.env),
+        signature.into_val(&f.env),
         &contexts,
     )
 }
+
+fn delegate_claims(f: &Fixture) -> CheckResult {
+    let ctx = vec![&f.env, call(&f.env, &f.sim, symbol_short!("claim"), &f.client.address)];
+    check(f, &f.delegate, ctx)
+}
+
+// ---- Master ----
 
 #[test]
 fn master_authorizes_any_call() {
@@ -79,11 +112,21 @@ fn master_authorizes_any_call() {
 }
 
 #[test]
+fn master_is_unaffected_by_expiry_of_other_signers() {
+    let f = setup();
+    set_delegate(&f, Some(110), vec![&f.env, claim_rule(&f)]);
+    f.env.ledger().set_sequence_number(10_000);
+    let ctx = vec![&f.env, call(&f.env, &f.sim, symbol_short!("withdraw"), &f.client.address)];
+    assert_eq!(check(&f, &f.master, ctx), Ok(()));
+}
+
+// ---- Delegate rules ----
+
+#[test]
 fn delegate_may_claim_for_the_account() {
     let f = setup();
     allow_delegate_claim(&f);
-    let ctx = vec![&f.env, call(&f.env, &f.sim, symbol_short!("claim"), &f.client.address)];
-    assert_eq!(check(&f, &f.delegate, ctx), Ok(()));
+    assert_eq!(delegate_claims(&f), Ok(()));
 }
 
 #[test]
@@ -129,7 +172,7 @@ fn delegate_cannot_authorize_calls_on_the_account_itself() {
     let f = setup();
     allow_delegate_claim(&f);
     let me = f.client.address.clone();
-    let ctx = vec![&f.env, call(&f.env, &me, Symbol::new(&f.env, "add_policy"), &me)];
+    let ctx = vec![&f.env, call(&f.env, &me, Symbol::new(&f.env, "set_signer"), &me)];
     assert_eq!(check(&f, &f.delegate, ctx), Err(Ok(AccError::NotAllowed)));
 }
 
@@ -141,70 +184,200 @@ fn delegate_cannot_authorize_contract_deployments() {
         executable: ContractExecutable::Wasm(BytesN::from_array(&f.env, &[0; 32])),
         salt: BytesN::from_array(&f.env, &[0; 32]),
     });
-    assert_eq!(
-        check(&f, &f.delegate, vec![&f.env, deploy]),
-        Err(Ok(AccError::NotAllowed))
-    );
+    assert_eq!(check(&f, &f.delegate, vec![&f.env, deploy]), Err(Ok(AccError::NotAllowed)));
 }
 
 #[test]
 fn signer_without_policy_is_rejected() {
     let f = setup();
-    let ctx = vec![&f.env, call(&f.env, &f.sim, symbol_short!("claim"), &f.client.address)];
-    assert_eq!(check(&f, &f.delegate, ctx), Err(Ok(AccError::UnknownSigner)));
+    assert_eq!(delegate_claims(&f), Err(Ok(AccError::UnknownSigner)));
 }
 
 #[test]
-fn emptied_policy_authorizes_nothing() {
+fn signer_with_an_empty_rule_list_authorizes_nothing() {
+    let f = setup();
+    set_delegate(&f, None, Vec::new(&f.env));
+    assert_eq!(delegate_claims(&f), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn removing_the_rule_authorizes_nothing() {
     let f = setup();
     allow_delegate_claim(&f);
-    f.client
-        .remove_policy(&pubkey(&f.env, &f.delegate), &f.sim, &symbol_short!("claim"));
-    let ctx = vec![&f.env, call(&f.env, &f.sim, symbol_short!("claim"), &f.client.address)];
-    assert_eq!(check(&f, &f.delegate, ctx), Err(Ok(AccError::NotAllowed)));
+    f.client.remove_rule(&delegate_id(&f), &f.sim, &symbol_short!("claim"));
+    assert_eq!(delegate_claims(&f), Err(Ok(AccError::NotAllowed)));
 }
+
+// ---- Argument constraints ----
+
+#[test]
+fn any_constraint_accepts_any_value_but_arity_must_match() {
+    let f = setup();
+    let rule = Rule {
+        contract: f.sim.clone(),
+        function: symbol_short!("withdraw"),
+        args: vec![&f.env, ArgConstraint::SelfAddress, ArgConstraint::Any],
+    };
+    set_delegate(&f, None, vec![&f.env, rule]);
+    let me = f.client.address.clone();
+
+    let two_args = |amount: i128| call_with(&f.sim, symbol_short!("withdraw"), vec![&f.env, me.into_val(&f.env), amount.into_val(&f.env)]);
+    assert_eq!(check(&f, &f.delegate, vec![&f.env, two_args(5)]), Ok(()));
+    assert_eq!(check(&f, &f.delegate, vec![&f.env, two_args(i128::MAX)]), Ok(()));
+
+    let one_arg = call(&f.env, &f.sim, symbol_short!("withdraw"), &me);
+    assert_eq!(check(&f, &f.delegate, vec![&f.env, one_arg]), Err(Ok(AccError::NotAllowed)));
+    let three_args = call_with(
+        &f.sim,
+        symbol_short!("withdraw"),
+        vec![&f.env, me.into_val(&f.env), 1i128.into_val(&f.env), 2i128.into_val(&f.env)],
+    );
+    assert_eq!(check(&f, &f.delegate, vec![&f.env, three_args]), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn exact_constraint_requires_the_same_value() {
+    let f = setup();
+    let allowed: i128 = 100;
+    let rule = Rule {
+        contract: f.sim.clone(),
+        function: symbol_short!("withdraw"),
+        args: vec![&f.env, ArgConstraint::SelfAddress, ArgConstraint::Exact(allowed.to_xdr(&f.env))],
+    };
+    set_delegate(&f, None, vec![&f.env, rule]);
+    let me = f.client.address.clone();
+    let withdraw = |amount: i128| {
+        vec![
+            &f.env,
+            call_with(&f.sim, symbol_short!("withdraw"), vec![&f.env, me.into_val(&f.env), amount.into_val(&f.env)]),
+        ]
+    };
+    assert_eq!(check(&f, &f.delegate, withdraw(100)), Ok(()));
+    assert_eq!(check(&f, &f.delegate, withdraw(101)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(check(&f, &f.delegate, withdraw(-100)), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn exact_constraint_does_not_confuse_value_types() {
+    let f = setup();
+    // The XDR of u32 100 differs from the XDR of i128 100, so the types cannot be swapped.
+    let rule = Rule {
+        contract: f.sim.clone(),
+        function: symbol_short!("poke"),
+        args: vec![&f.env, ArgConstraint::Exact(100i128.to_xdr(&f.env))],
+    };
+    set_delegate(&f, None, vec![&f.env, rule]);
+    let with = |value: Val| vec![&f.env, call_with(&f.sim, symbol_short!("poke"), vec![&f.env, value])];
+    assert_eq!(check(&f, &f.delegate, with(100i128.into_val(&f.env))), Ok(()));
+    assert_eq!(check(&f, &f.delegate, with(100u32.into_val(&f.env))), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn zero_argument_functions_can_be_allowed() {
+    let f = setup();
+    let rule = Rule { contract: f.sim.clone(), function: symbol_short!("ping"), args: Vec::new(&f.env) };
+    set_delegate(&f, None, vec![&f.env, rule]);
+    let ping = call_with(&f.sim, symbol_short!("ping"), Vec::new(&f.env));
+    assert_eq!(check(&f, &f.delegate, vec![&f.env, ping]), Ok(()));
+    assert_eq!(delegate_claims(&f), Err(Ok(AccError::NotAllowed)));
+}
+
+// ---- Expiry ----
+
+#[test]
+fn delegate_is_accepted_up_to_and_including_the_expiry_ledger() {
+    let f = setup();
+    set_delegate(&f, Some(200), vec![&f.env, claim_rule(&f)]);
+    f.env.ledger().set_sequence_number(199);
+    assert_eq!(delegate_claims(&f), Ok(()));
+    f.env.ledger().set_sequence_number(200);
+    assert_eq!(delegate_claims(&f), Ok(()));
+}
+
+#[test]
+fn delegate_is_refused_after_the_expiry_ledger() {
+    let f = setup();
+    set_delegate(&f, Some(200), vec![&f.env, claim_rule(&f)]);
+    f.env.ledger().set_sequence_number(201);
+    assert_eq!(delegate_claims(&f), Err(Ok(AccError::SignerExpired)));
+}
+
+#[test]
+fn an_expired_delegate_is_refused_even_for_calls_its_rules_allow() {
+    let f = setup();
+    set_delegate(&f, Some(150), vec![&f.env, claim_rule(&f)]);
+    f.env.ledger().set_sequence_number(5_000);
+    assert_eq!(delegate_claims(&f), Err(Ok(AccError::SignerExpired)));
+}
+
+#[test]
+fn set_expiry_extends_an_expired_delegate() {
+    let f = setup();
+    set_delegate(&f, Some(150), vec![&f.env, claim_rule(&f)]);
+    f.env.ledger().set_sequence_number(300);
+    assert_eq!(delegate_claims(&f), Err(Ok(AccError::SignerExpired)));
+    f.client.set_expiry(&delegate_id(&f), &Some(400));
+    assert_eq!(delegate_claims(&f), Ok(()));
+}
+
+#[test]
+fn set_expiry_can_shorten_and_remove_the_expiry() {
+    let f = setup();
+    set_delegate(&f, Some(1_000), vec![&f.env, claim_rule(&f)]);
+    f.client.set_expiry(&delegate_id(&f), &Some(120));
+    f.env.ledger().set_sequence_number(121);
+    assert_eq!(delegate_claims(&f), Err(Ok(AccError::SignerExpired)));
+    f.client.set_expiry(&delegate_id(&f), &None);
+    assert_eq!(delegate_claims(&f), Ok(()));
+}
+
+#[test]
+fn an_expiry_in_the_past_or_now_is_invalid() {
+    let f = setup();
+    f.env.mock_all_auths();
+    for ledger in [0u32, 99, 100] {
+        let res = f.client.try_set_signer(&delegate_id(&f), &Some(ledger), &vec![&f.env, claim_rule(&f)]);
+        assert_eq!(res, Err(Ok(AccError::InvalidPolicy)));
+    }
+    assert!(f.client.try_set_signer(&delegate_id(&f), &Some(101), &vec![&f.env, claim_rule(&f)]).is_ok());
+    assert_eq!(f.client.try_set_expiry(&delegate_id(&f), &Some(100)), Err(Ok(AccError::InvalidPolicy)));
+}
+
+// ---- Signature checks ----
 
 #[test]
 fn invalid_signature_is_rejected() {
     let f = setup();
     let payload = BytesN::from_array(&f.env, &[7u8; 32]);
-    let forged = AccSignature {
+    let forged = AccSignature::Ed25519(Ed25519Signature {
         signer: pubkey(&f.env, &f.master),
         sig: BytesN::from_array(&f.env, &f.delegate.sign(&payload.to_array()).to_bytes()),
-    };
+    });
     let ctx = vec![&f.env, call(&f.env, &f.sim, symbol_short!("claim"), &f.client.address)];
-    let res = f.env.try_invoke_contract_check_auth::<AccError>(
-        &f.client.address,
-        &payload,
-        forged.into_val(&f.env),
-        &ctx,
-    );
+    let res = f.env.try_invoke_contract_check_auth::<AccError>(&f.client.address, &payload, forged.into_val(&f.env), &ctx);
     assert!(res.is_err());
 }
 
 #[test]
-fn delegate_signing_as_master_key_fails() {
+fn delegate_cannot_borrow_the_master_signature() {
     let f = setup();
     allow_delegate_claim(&f);
     let payload = BytesN::from_array(&f.env, &[7u8; 32]);
-    let sig = AccSignature {
+    let mismatched = AccSignature::Ed25519(Ed25519Signature {
         signer: pubkey(&f.env, &f.delegate),
         sig: BytesN::from_array(&f.env, &f.master.sign(&payload.to_array()).to_bytes()),
-    };
+    });
     let ctx = vec![&f.env, call(&f.env, &f.sim, symbol_short!("claim"), &f.client.address)];
     assert!(f
         .env
-        .try_invoke_contract_check_auth::<AccError>(
-            &f.client.address,
-            &payload,
-            sig.into_val(&f.env),
-            &ctx,
-        )
+        .try_invoke_contract_check_auth::<AccError>(&f.client.address, &payload, mismatched.into_val(&f.env), &ctx)
         .is_err());
 }
 
+// ---- Admin ----
+
 #[test]
-fn policy_changes_require_the_account_auth() {
+fn admin_calls_require_the_account_auth() {
     let f = setup();
     allow_delegate_claim(&f);
     let auths = f.env.auths();
@@ -213,28 +386,109 @@ fn policy_changes_require_the_account_auth() {
 }
 
 #[test]
-fn policy_changes_fail_without_auth() {
+fn admin_calls_fail_without_auth() {
     let f = setup();
-    let res = f
-        .client
-        .try_add_policy(&pubkey(&f.env, &f.delegate), &f.sim, &symbol_short!("claim"), &true);
-    assert!(res.is_err());
+    let id = delegate_id(&f);
+    let rules = vec![&f.env, claim_rule(&f)];
+    assert!(f.client.try_set_signer(&id, &None, &rules).is_err());
+    assert!(f.client.try_add_rule(&id, &claim_rule(&f)).is_err());
+    assert!(f.client.try_set_expiry(&id, &Some(500)).is_err());
+    assert!(f.client.try_revoke_signer(&id).is_err());
 }
 
 #[test]
-fn master_cannot_be_given_a_policy() {
+fn master_cannot_be_given_a_delegate_policy() {
     let f = setup();
     f.env.mock_all_auths();
-    let res = f
-        .client
-        .try_add_policy(&pubkey(&f.env, &f.master), &f.sim, &symbol_short!("claim"), &true);
+    let res = f.client.try_set_signer(&signer_id(&f, &f.master), &None, &vec![&f.env, claim_rule(&f)]);
     assert_eq!(res, Err(Ok(AccError::InvalidPolicy)));
 }
 
 #[test]
-fn adding_the_same_rule_twice_is_idempotent() {
+fn rules_on_the_account_itself_are_invalid() {
+    let f = setup();
+    f.env.mock_all_auths();
+    let rule = Rule {
+        contract: f.client.address.clone(),
+        function: Symbol::new(&f.env, "set_signer"),
+        args: Vec::new(&f.env),
+    };
+    let res = f.client.try_set_signer(&delegate_id(&f), &None, &vec![&f.env, rule]);
+    assert_eq!(res, Err(Ok(AccError::InvalidPolicy)));
+}
+
+#[test]
+fn too_many_rules_or_arguments_are_invalid() {
+    let f = setup();
+    f.env.mock_all_auths();
+    let mut rules = Vec::new(&f.env);
+    for _ in 0..33 {
+        rules.push_back(claim_rule(&f));
+    }
+    assert_eq!(f.client.try_set_signer(&delegate_id(&f), &None, &rules), Err(Ok(AccError::InvalidPolicy)));
+
+    let mut args = Vec::new(&f.env);
+    for _ in 0..17 {
+        args.push_back(ArgConstraint::Any);
+    }
+    let wide = Rule { contract: f.sim.clone(), function: symbol_short!("wide"), args };
+    assert_eq!(
+        f.client.try_set_signer(&delegate_id(&f), &None, &vec![&f.env, wide]),
+        Err(Ok(AccError::InvalidPolicy))
+    );
+}
+
+#[test]
+fn set_signer_replaces_the_whole_policy() {
+    let f = setup();
+    allow_delegate_claim(&f);
+    let other = Rule { contract: f.sim.clone(), function: symbol_short!("ping"), args: Vec::new(&f.env) };
+    f.client.set_signer(&delegate_id(&f), &Some(500), &vec![&f.env, other.clone()]);
+
+    let policy = f.client.get_signer(&delegate_id(&f)).unwrap();
+    assert_eq!(policy, SignerPolicy { valid_until_ledger: Some(500), rules: vec![&f.env, other] });
+    assert_eq!(delegate_claims(&f), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(f.client.list_signers().len(), 1);
+}
+
+#[test]
+fn add_rule_is_idempotent_and_needs_a_registered_signer() {
+    let f = setup();
+    f.env.mock_all_auths();
+    assert_eq!(f.client.try_add_rule(&delegate_id(&f), &claim_rule(&f)), Err(Ok(AccError::UnknownSigner)));
+
+    set_delegate(&f, None, Vec::new(&f.env));
+    f.client.add_rule(&delegate_id(&f), &claim_rule(&f));
+    f.client.add_rule(&delegate_id(&f), &claim_rule(&f));
+    assert_eq!(f.client.get_signer(&delegate_id(&f)).unwrap().rules.len(), 1);
+    assert_eq!(delegate_claims(&f), Ok(()));
+}
+
+#[test]
+fn revoked_signer_is_unknown_and_unlisted() {
+    let f = setup();
+    allow_delegate_claim(&f);
+    assert_eq!(f.client.list_signers(), vec![&f.env, delegate_id(&f)]);
+
+    f.client.revoke_signer(&delegate_id(&f));
+    assert_eq!(f.client.list_signers().len(), 0);
+    assert_eq!(f.client.get_signer(&delegate_id(&f)), None);
+    assert_eq!(delegate_claims(&f), Err(Ok(AccError::UnknownSigner)));
+    assert_eq!(f.client.try_revoke_signer(&delegate_id(&f)), Err(Ok(AccError::UnknownSigner)));
+}
+
+#[test]
+fn list_signers_has_no_duplicates_and_tracks_each_signer() {
     let f = setup();
     allow_delegate_claim(&f);
     allow_delegate_claim(&f);
-    assert_eq!(f.client.get_policy(&pubkey(&f.env, &f.delegate)).len(), 1);
+    let second = key(3);
+    f.client.set_signer(&signer_id(&f, &second), &None, &Vec::new(&f.env));
+    assert_eq!(f.client.list_signers(), vec![&f.env, delegate_id(&f), signer_id(&f, &second)]);
+}
+
+#[test]
+fn the_master_is_exposed_by_master() {
+    let f = setup();
+    assert_eq!(f.client.master(), pubkey(&f.env, &f.master));
 }

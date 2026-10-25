@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import type { StepResult } from "@poc/core";
-import type { DemoState, PolicyRule, StepMeta } from "./api-types";
-import { accountUrl, fetchState, formatXlm, shortAddress, startRun, stepStatus, type StepStatus } from "./api";
+import type { RuleView, StepResult } from "@poc/core";
+import type { DemoState, StepMeta } from "./api-types";
+import {
+  accountUrl,
+  describeRule,
+  expiryText,
+  fetchState,
+  formatXlm,
+  shortAddress,
+  startRun,
+  stepStatus,
+  type StepStatus,
+} from "./api";
 
 const STATUS_LABEL: Record<StepStatus, string> = {
   pending: "Not run",
@@ -70,18 +80,24 @@ function Balances({ state }: { state: DemoState }) {
   );
 }
 
-function RuleLine({ rule, simulator }: { rule: PolicyRule; simulator: string }) {
+function RuleLine({ rule, simulator }: { rule: RuleView; simulator: string }) {
   const where = rule.contract === simulator ? "yield simulator" : shortAddress(rule.contract);
   return (
     <li>
-      <code>{rule.function}()</code> on {where}
-      {rule.self_arg ? <span className="tag">only for this account</span> : <span className="tag">any arguments</span>}
+      <code>{describeRule(rule)}</code> on {where}
     </li>
   );
 }
 
+function ExpiryLine({ validUntil, latest }: { validUntil: number | null; latest: number | null }) {
+  if (validUntil === null) return <span className="tag">no expiry</span>;
+  if (latest === null) return <span className="tag">expires at ledger {validUntil.toLocaleString("en-US")}</span>;
+  if (latest > validUntil) return <span className="tag expired">expired at ledger {validUntil.toLocaleString("en-US")}</span>;
+  return <span className="tag">{expiryText(validUntil, latest)}</span>;
+}
+
 function Policy({ state }: { state: DemoState }) {
-  const rules = state.delegatePolicy;
+  const policy = state.delegatePolicy;
   return (
     <section className="card">
       <h2>Signing policy</h2>
@@ -97,23 +113,32 @@ function Policy({ state }: { state: DemoState }) {
             <td>
               <span className="badge master">master</span> <AddressLink address={state.accounts.master} />
             </td>
-            <td>Any call (default signer)</td>
+            <td>Any call (default signer, never expires)</td>
           </tr>
           <tr>
             <td>
               <span className="badge delegate">delegate</span> <AddressLink address={state.accounts.delegate} />
             </td>
             <td>
-              {rules === null ? (
-                <span className="muted">unknown</span>
-              ) : rules.length === 0 ? (
-                <span className="muted">Nothing yet (policy not set; step 1 grants claim)</span>
+              {policy === null ? (
+                <span className="muted">Not registered yet (step 1 sets the policy)</span>
               ) : (
-                <ul>
-                  {rules.map((rule) => (
-                    <RuleLine key={`${rule.contract}.${rule.function}`} rule={rule} simulator={state.accounts.simulator} />
-                  ))}
-                </ul>
+                <>
+                  <ExpiryLine validUntil={policy.validUntilLedger} latest={state.latestLedger} />
+                  {policy.rules.length === 0 ? (
+                    <div className="muted">Nothing</div>
+                  ) : (
+                    <ul>
+                      {policy.rules.map((rule) => (
+                        <RuleLine
+                          key={`${rule.contract}.${rule.function}.${rule.args.map((a) => a.kind).join()}`}
+                          rule={rule}
+                          simulator={state.accounts.simulator}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </>
               )}
               <span className="muted small">Everything else, including withdraw(), is refused.</span>
             </td>
@@ -206,6 +231,17 @@ export default function App() {
     }
   };
 
+  const renderStep = (meta: StepMeta) => (
+    <StepCard
+      key={meta.n}
+      meta={meta}
+      result={state?.results[String(meta.n)]}
+      running={state?.run.currentStep === meta.n}
+      busy={busy}
+      onRun={() => void start({ action: "steps", from: meta.n, to: meta.n })}
+    />
+  );
+
   return (
     <main>
       <header>
@@ -246,18 +282,38 @@ export default function App() {
               seven steps. Per-step Run buttons act on the current smart account.
             </p>
             <ol className="steps">
-              {state.steps.map((meta) => (
-                <StepCard
-                  key={meta.n}
-                  meta={meta}
-                  result={state.results[String(meta.n)]}
-                  running={state.run.currentStep === meta.n}
-                  busy={busy}
-                  onRun={() => void start({ action: "steps", from: meta.n, to: meta.n })}
-                />
-              ))}
+              {state.steps
+                .filter((meta) => !meta.optional)
+                .map((meta) => renderStep(meta))}
             </ol>
           </section>
+
+          {state.steps.some((meta) => meta.optional) && (
+            <section className="card">
+              <div className="section-head">
+                <h2>Expiry demo (optional)</h2>
+                <button
+                  className="ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    const optional = state.steps.filter((meta) => meta.optional).map((meta) => meta.n);
+                    void start({ action: "steps", from: Math.min(...optional), to: Math.max(...optional) });
+                  }}
+                >
+                  Run expiry demo
+                </button>
+              </div>
+              <p className="muted small">
+                Run after the main demo. The master shortens the delegate's expiry to about a minute; once the ledger
+                passes it, the delegate's otherwise-allowed claim() is refused. Takes about a minute.
+              </p>
+              <ol className="steps">
+                {state.steps
+                  .filter((meta) => meta.optional)
+                  .map((meta) => renderStep(meta))}
+              </ol>
+            </section>
+          )}
 
           {state.run.log.length > 0 && (
             <section className="card">

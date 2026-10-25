@@ -1,8 +1,16 @@
-import { Address, Keypair, nativeToScVal, rpc, xdr } from "@stellar/stellar-sdk";
+import { Address, Keypair, nativeToScVal, rpc } from "@stellar/stellar-sdk";
 import { Authorizer, ChainContext, invoke, InvokeResult, read } from "./chain.js";
 import { DEFAULT_RPC_URL, NATIVE_TOKEN_ID, requireEnv, STROOPS_PER_XLM } from "./config.js";
+import { optionLedgerScVal, parseSignerPolicy, rulesScVal, signerIdScVal, type SignerPolicyView } from "./policy.js";
 
 export const FUND_AMOUNT = 9_500n * STROOPS_PER_XLM;
+
+// Testnet closes a ledger roughly every 5 seconds.
+export const LEDGERS_PER_MINUTE = 12;
+/** The delegate's validity window when the policy is set (about 30 minutes). */
+export const DELEGATE_VALIDITY_LEDGERS = 30 * LEDGERS_PER_MINUTE;
+/** Window used by the optional expiry demo (about 1 minute). */
+export const SHORT_VALIDITY_LEDGERS = LEDGERS_PER_MINUTE;
 
 export interface ScenarioContext extends ChainContext {
   master: Keypair;
@@ -53,6 +61,10 @@ interface StepSpec {
   name: string;
   signer: "master" | "delegate";
   expected: "success" | "failure";
+  /** For an expected failure: the account's own error that must be the cause (not just any failure). */
+  expectedError?: string;
+  /** Not part of the core 7-step demo; run on request. */
+  optional?: boolean;
   run: (ctx: ScenarioContext) => Promise<{ result: InvokeResult; note?: string }>;
 }
 
@@ -90,6 +102,25 @@ export async function waitForYield(ctx: ScenarioContext, timeoutSeconds = 180): 
   }
 }
 
+export async function latestLedger(ctx: ScenarioContext): Promise<number> {
+  return (await ctx.server.getLatestLedger()).sequence;
+}
+
+export async function readDelegatePolicy(ctx: ScenarioContext): Promise<SignerPolicyView | null> {
+  const native = await read(ctx, ctx.smartAccountId, "get_signer", [signerIdScVal(ctx.delegate.rawPublicKey())]);
+  return native ? parseSignerPolicy(native) : null;
+}
+
+export async function waitForLedgerAfter(ctx: ScenarioContext, ledger: number, timeoutSeconds = 180): Promise<number> {
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  for (;;) {
+    const current = await latestLedger(ctx);
+    if (current > ledger) return current;
+    if (Date.now() > deadline) throw new Error(`Ledger ${ledger} not passed within ${timeoutSeconds}s`);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+}
+
 async function claim(ctx: ScenarioContext, who: "master" | "delegate") {
   const accrued = await waitForYield(ctx);
   const result = await invoke(ctx, {
@@ -114,22 +145,25 @@ async function withdraw(ctx: ScenarioContext, who: "master" | "delegate") {
 
 export const STEPS: StepSpec[] = [
   {
-    name: "Master sets policy: delegate may call claim() on the yield simulator, for the account itself only",
+    name: "Master sets policy: delegate may call claim() on the yield simulator, for the account itself only, for about 30 minutes",
     signer: "master",
     expected: "success",
-    run: async (ctx) => ({
-      result: await invoke(ctx, {
-        contractId: ctx.smartAccountId,
-        method: "add_policy",
-        args: [
-          nativeToScVal(ctx.delegate.rawPublicKey(), { type: "bytes" }),
-          addr(ctx.simId),
-          xdr.ScVal.scvSymbol("claim"),
-          xdr.ScVal.scvBool(true),
-        ],
-        authorizers: [smartAuth(ctx, "master")],
-      }),
-    }),
+    run: async (ctx) => {
+      const validUntil = (await latestLedger(ctx)) + DELEGATE_VALIDITY_LEDGERS;
+      return {
+        result: await invoke(ctx, {
+          contractId: ctx.smartAccountId,
+          method: "set_signer",
+          args: [
+            signerIdScVal(ctx.delegate.rawPublicKey()),
+            optionLedgerScVal(validUntil),
+            rulesScVal([{ contract: ctx.simId, function: "claim", args: [{ kind: "self" }] }]),
+          ],
+          authorizers: [smartAuth(ctx, "master")],
+        }),
+        note: `delegate valid until ledger ${validUntil}`,
+      };
+    },
   },
   {
     name: "Master account sends 9,500 XLM to the smart account",
@@ -177,6 +211,7 @@ export const STEPS: StepSpec[] = [
     name: "withdraw() signed by the delegate is rejected by the policy",
     signer: "delegate",
     expected: "failure",
+    expectedError: "NotAllowed",
     run: (ctx) => withdraw(ctx, "delegate"),
   },
   {
@@ -185,7 +220,50 @@ export const STEPS: StepSpec[] = [
     expected: "success",
     run: (ctx) => withdraw(ctx, "master"),
   },
+  {
+    name: "Master shortens the delegate's expiry to about 1 minute",
+    signer: "master",
+    expected: "success",
+    optional: true,
+    run: async (ctx) => {
+      const validUntil = (await latestLedger(ctx)) + SHORT_VALIDITY_LEDGERS;
+      return {
+        result: await invoke(ctx, {
+          contractId: ctx.smartAccountId,
+          method: "set_expiry",
+          args: [signerIdScVal(ctx.delegate.rawPublicKey()), optionLedgerScVal(validUntil)],
+          authorizers: [smartAuth(ctx, "master")],
+        }),
+        note: `delegate now valid until ledger ${validUntil}`,
+      };
+    },
+  },
+  {
+    name: "claim() signed by the delegate after its expiry is rejected",
+    signer: "delegate",
+    expected: "failure",
+    expectedError: "SignerExpired",
+    optional: true,
+    run: async (ctx) => {
+      const policy = await readDelegatePolicy(ctx);
+      if (policy?.validUntilLedger == null) throw new Error("The delegate has no expiry; run the previous step first");
+      const accrued = await bigintView(ctx, ctx.simId, "accrued_yield", ctx.smartAccountId);
+      // The call must reach the policy check, so the simulator must have something to claim.
+      if (accrued === 0n) throw new Error("No accrued yield left to claim; run this on an account that has been through step 5");
+      const ledger = await waitForLedgerAfter(ctx, policy.validUntilLedger);
+      const result = await invoke(ctx, {
+        contractId: ctx.simId,
+        method: "claim",
+        args: [addr(ctx.smartAccountId)],
+        authorizers: [smartAuth(ctx, "delegate")],
+      });
+      return { result, note: `expired after ledger ${policy.validUntilLedger}; current ledger ${ledger}` };
+    },
+  },
 ];
+
+/** The core demo is every step that is not optional (steps 1-7). */
+export const CORE_STEP_COUNT = STEPS.filter((s) => !s.optional).length;
 
 export async function runStep(ctx: ScenarioContext, step: number): Promise<StepResult> {
   const spec = STEPS[step - 1];
@@ -195,6 +273,8 @@ export async function runStep(ctx: ScenarioContext, step: number): Promise<StepR
   const { result, note } = await spec.run(ctx);
   const after = await snapshot(ctx);
   const outcome = result.ok ? "success" : "failure";
+  // A failure only counts when it is the failure the step is about, so an unrelated error cannot pass.
+  const rightFailure = result.ok || !spec.expectedError || result.error.includes(spec.expectedError);
 
   return {
     step,
@@ -202,7 +282,7 @@ export async function runStep(ctx: ScenarioContext, step: number): Promise<StepR
     signer: spec.signer,
     expected: spec.expected,
     outcome,
-    asExpected: outcome === spec.expected,
+    asExpected: outcome === spec.expected && rightFailure,
     ...(result.ok
       ? { txHash: result.hash, explorerUrl: `https://stellar.expert/explorer/testnet/tx/${result.hash}` }
       : { failureStage: result.stage, error: result.error }),

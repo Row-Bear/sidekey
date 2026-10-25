@@ -11,6 +11,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { NETWORK_PASSPHRASE } from "./config.js";
+import { ed25519SignatureScVal } from "./policy.js";
 
 /** Who must authorize a Soroban call: a classic G account or the smart account. */
 export type Authorizer =
@@ -49,11 +50,9 @@ export type InvokeResult = InvokeSuccess | InvokeFailure;
 const INCLUSION_FEE = "10000";
 const AUTH_VALIDITY_LEDGERS = 60;
 
-/** Encodes the smart account's `AccSignature { signer, sig }` struct (map keys sorted). */
+/** Encodes the smart account's `AccSignature::Ed25519` signature for a G-key signer. */
 export function smartAccountSignature(signer: Keypair, signature: Uint8Array): xdr.ScVal {
-  const entry = (key: string, bytes: Uint8Array) =>
-    new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val: xdr.ScVal.scvBytes(Buffer.from(bytes)) });
-  return xdr.ScVal.scvMap([entry("sig", signature), entry("signer", signer.rawPublicKey())]);
+  return ed25519SignatureScVal(signer.rawPublicKey(), signature);
 }
 
 function buildTransaction(source: Account, func: xdr.HostFunction, auth: xdr.SorobanAuthorizationEntry[]) {
@@ -112,6 +111,7 @@ const SMART_ACCOUNT_ERRORS: Record<number, string> = {
   2: "UnknownSigner",
   3: "NotAllowed",
   4: "InvalidPolicy",
+  5: "SignerExpired",
 };
 
 /** The host reports any failed `__check_auth` as Auth/InvalidAction; the real error is in the diagnostics. */

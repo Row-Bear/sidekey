@@ -1,16 +1,12 @@
-import type { Snapshot, StepResult } from "@poc/core";
+import type { SignerPolicyView, Snapshot, StepResult } from "@poc/core";
 
 export interface StepMeta {
   n: number;
   name: string;
   signer: "master" | "delegate";
   expected: "success" | "failure";
-}
-
-export interface PolicyRule {
-  contract: string;
-  function: string;
-  self_arg: boolean;
+  /** Not part of the core 7-step demo (the expiry steps). */
+  optional?: boolean;
 }
 
 export interface DemoState {
@@ -24,7 +20,9 @@ export interface DemoState {
   };
   /** Live on-chain values; null when the RPC read failed (see `readError`). */
   snapshot: Snapshot | null;
-  delegatePolicy: PolicyRule[] | null;
+  /** The delegate's policy on the account: expiry and rules. Null if it is not registered or unreadable. */
+  delegatePolicy: SignerPolicyView | null;
+  latestLedger: number | null;
   readError?: string;
   steps: StepMeta[];
   results: Record<string, StepResult>;

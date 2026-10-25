@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { loadResults, requireEnv, STEPS, type StepResult } from "@poc/core";
+import { CORE_STEP_COUNT, loadResults, requireEnv, STEPS, type StepResult } from "@poc/core";
 
 const RESULTS_PATH = new URL("../demo-run.json", import.meta.url);
 const OUT_PATH = fileURLToPath(new URL("../docs/recorded-run.md", import.meta.url));
@@ -19,7 +19,9 @@ function row(result: StepResult): string {
 }
 
 const results = Object.values(loadResults(RESULTS_PATH)).sort((a, b) => a.step - b.step);
-if (results.length !== STEPS.length || results.some((r) => !r.asExpected)) {
+// Every core step must be present; the optional expiry steps are included when they were run.
+const complete = Array.from({ length: CORE_STEP_COUNT }, (_, i) => results.some((r) => r.step === i + 1)).every(Boolean);
+if (!complete || results.some((r) => !r.asExpected)) {
   throw new Error("demo-run.json is not a complete run where every step behaved as expected; refusing to export it.");
 }
 
@@ -42,8 +44,9 @@ const lines = [
   "|---|------|--------|---------|----------|----------|",
   ...results.map(row),
   "",
-  "Step 6 is rejected during the enforcing simulation, before submission, so it has no transaction.",
-  "The host reports `Auth/InvalidAction`; the diagnostics show the account's `__check_auth` returned `NotAllowed (#3)`.",
+  "Steps 6 and 9 are rejected during the enforcing simulation, before submission, so they have no transaction.",
+  "The host reports `Auth/InvalidAction`; the diagnostics show the account's `__check_auth` returned",
+  "`NotAllowed (#3)` for step 6 (the policy) and `SignerExpired (#5)` for step 9 (the delegate's expiry).",
   "",
 ];
 writeFileSync(OUT_PATH, lines.join("\n"));

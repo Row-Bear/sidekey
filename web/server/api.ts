@@ -3,20 +3,21 @@ import { parse } from "dotenv";
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
-import { nativeToScVal } from "@stellar/stellar-sdk";
 import type { Plugin } from "vite";
 import {
   clearResults,
+  CORE_STEP_COUNT,
   createFreshDemoAccount,
   createScenarioContext,
+  latestLedger,
   loadResults,
-  read,
+  readDelegatePolicy,
   runStep,
   saveResult,
   snapshot,
   STEPS,
 } from "../../packages/core/src/index.ts";
-import type { DemoState, PolicyRule, RunRequest } from "../src/api-types.ts";
+import type { DemoState, RunRequest } from "../src/api-types.ts";
 import { checkApiRequest } from "./guard.ts";
 
 const MAX_LOG_LINES = 60;
@@ -73,18 +74,23 @@ export function demoApi(repoRoot: string): Plugin {
       },
       snapshot: null,
       delegatePolicy: null,
-      steps: STEPS.map((s, i) => ({ n: i + 1, name: s.name, signer: s.signer, expected: s.expected })),
+      latestLedger: null,
+      steps: STEPS.map((s, i) => ({
+        n: i + 1,
+        name: s.name,
+        signer: s.signer,
+        expected: s.expected,
+        ...(s.optional ? { optional: true } : {}),
+      })),
       results: loadResults(resultsPath),
       run: { ...run, log: [...run.log] },
       updatedAt: new Date().toISOString(),
     };
     try {
-      const [snap, policy] = await Promise.all([
-        snapshot(ctx),
-        read(ctx, ctx.smartAccountId, "get_policy", [nativeToScVal(ctx.delegate.rawPublicKey(), { type: "bytes" })]),
-      ]);
+      const [snap, policy, ledger] = await Promise.all([snapshot(ctx), readDelegatePolicy(ctx), latestLedger(ctx)]);
       state.snapshot = snap;
-      state.delegatePolicy = policy as PolicyRule[];
+      state.delegatePolicy = policy;
+      state.latestLedger = ledger;
     } catch (err) {
       state.readError = err instanceof Error ? err.message : String(err);
     }
@@ -101,7 +107,8 @@ export function demoApi(repoRoot: string): Plugin {
       if (request.action === "fresh") return;
 
       const from = request.action === "steps" ? request.from : 1;
-      const to = request.action === "steps" ? request.to : STEPS.length;
+      // "full" is the core demo (steps 1-7); the optional expiry steps run on request.
+      const to = request.action === "steps" ? request.to : CORE_STEP_COUNT;
       const ctx = currentContext();
       for (let step = from; step <= to; step++) {
         run.currentStep = step;

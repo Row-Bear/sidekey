@@ -4,34 +4,74 @@ use soroban_sdk::{
     auth::{Context, ContractContext, CustomAccountInterface},
     contract, contracterror, contractimpl, contracttype,
     crypto::Hash,
-    Address, BytesN, Env, Symbol, TryFromVal, Vec,
+    xdr::ToXdr,
+    Address, Bytes, BytesN, Env, Symbol, TryFromVal, Vec,
 };
 
 // About 30 days of ledgers at ~5s each.
 const TTL_THRESHOLD: u32 = 518_400;
 const TTL_EXTEND_TO: u32 = 535_680;
 
+// Bounds keep the work done in `__check_auth` small and predictable.
+const MAX_RULES: u32 = 32;
+const MAX_ARGS: u32 = 16;
+
 #[contracttype]
 enum DataKey {
     Master,
-    Policy(BytesN<32>),
+    Signers,
+    Signer(SignerId),
 }
 
-/// One permitted call for a delegate. When `self_arg` is set, the first call
-/// argument must be this account's own address (e.g. `claim(user)` only for itself).
+/// Identifies a signer. More key types (for example passkeys) can be added as variants.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SignerId {
+    Ed25519(BytesN<32>),
+}
+
+/// What a rule requires of one call argument.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ArgConstraint {
+    /// Any value.
+    Any,
+    /// The argument must be this account's own address.
+    SelfAddress,
+    /// The argument must equal this XDR-encoded value.
+    Exact(Bytes),
+}
+
+/// One permitted call. `args` has one constraint per call argument: a call with a
+/// different number of arguments never matches.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Rule {
     pub contract: Address,
     pub function: Symbol,
-    pub self_arg: bool,
+    pub args: Vec<ArgConstraint>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SignerPolicy {
+    /// Last ledger (inclusive) in which this signer is accepted; `None` means no expiry.
+    /// Separate from the host's per-signature `signatureExpirationLedger`.
+    pub valid_until_ledger: Option<u32>,
+    pub rules: Vec<Rule>,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub struct AccSignature {
+pub struct Ed25519Signature {
     pub signer: BytesN<32>,
     pub sig: BytesN<64>,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub enum AccSignature {
+    Ed25519(Ed25519Signature),
 }
 
 #[contracterror]
@@ -42,6 +82,7 @@ pub enum AccError {
     UnknownSigner = 2,
     NotAllowed = 3,
     InvalidPolicy = 4,
+    SignerExpired = 5,
 }
 
 #[contract]
@@ -49,9 +90,11 @@ pub struct SmartAccount;
 
 #[contractimpl]
 impl SmartAccount {
-    /// `master` is the raw ed25519 public key of the default G-address signer.
+    /// `master` is the raw ed25519 public key of the default G-address signer. The master
+    /// never expires and is never subject to rules.
     pub fn __constructor(env: Env, master: BytesN<32>) {
         env.storage().instance().set(&DataKey::Master, &master);
+        env.storage().instance().set(&DataKey::Signers, &Vec::<SignerId>::new(&env));
         Self::bump(&env);
     }
 
@@ -59,45 +102,127 @@ impl SmartAccount {
         env.storage().instance().get(&DataKey::Master).unwrap()
     }
 
-    /// Allow `signer` to call `function` on `contract`. Master-only: authorizing
-    /// the account's own address is satisfied only by the master's signature.
-    pub fn add_policy(
+    // The admin functions below authorize the account's own address, which only the master can satisfy.
+
+    /// Creates or replaces a signer's whole policy: its expiry and its rules.
+    pub fn set_signer(
         env: Env,
-        signer: BytesN<32>,
-        contract: Address,
-        function: Symbol,
-        self_arg: bool,
+        signer: SignerId,
+        valid_until_ledger: Option<u32>,
+        rules: Vec<Rule>,
     ) -> Result<(), AccError> {
         env.current_contract_address().require_auth();
-        if signer == Self::master(env.clone()) || contract == env.current_contract_address() {
-            return Err(AccError::InvalidPolicy);
-        }
-        let rule = Rule { contract, function, self_arg };
-        let mut rules = Self::get_policy(env.clone(), signer.clone());
-        if !rules.contains(&rule) {
-            rules.push_back(rule);
-        }
-        env.storage().instance().set(&DataKey::Policy(signer), &rules);
-        Self::bump(&env);
+        Self::ensure_not_master(&env, &signer)?;
+        Self::validate_expiry(&env, valid_until_ledger)?;
+        Self::validate_rules(&env, &rules)?;
+        Self::store(&env, &signer, &SignerPolicy { valid_until_ledger, rules });
         Ok(())
     }
 
-    pub fn remove_policy(env: Env, signer: BytesN<32>, contract: Address, function: Symbol) {
+    pub fn add_rule(env: Env, signer: SignerId, rule: Rule) -> Result<(), AccError> {
         env.current_contract_address().require_auth();
+        let mut policy = Self::policy_of(&env, &signer).ok_or(AccError::UnknownSigner)?;
+        if !policy.rules.contains(&rule) {
+            policy.rules.push_back(rule);
+        }
+        Self::validate_rules(&env, &policy.rules)?;
+        Self::store(&env, &signer, &policy);
+        Ok(())
+    }
+
+    /// Removes every rule for `function` on `contract`.
+    pub fn remove_rule(env: Env, signer: SignerId, contract: Address, function: Symbol) -> Result<(), AccError> {
+        env.current_contract_address().require_auth();
+        let mut policy = Self::policy_of(&env, &signer).ok_or(AccError::UnknownSigner)?;
         let mut kept = Vec::new(&env);
-        for rule in Self::get_policy(env.clone(), signer.clone()).iter() {
+        for rule in policy.rules.iter() {
             if !(rule.contract == contract && rule.function == function) {
                 kept.push_back(rule);
             }
         }
-        env.storage().instance().set(&DataKey::Policy(signer), &kept);
+        policy.rules = kept;
+        Self::store(&env, &signer, &policy);
+        Ok(())
     }
 
-    pub fn get_policy(env: Env, signer: BytesN<32>) -> Vec<Rule> {
+    /// Sets, extends or removes (`None`) a signer's expiry.
+    pub fn set_expiry(env: Env, signer: SignerId, valid_until_ledger: Option<u32>) -> Result<(), AccError> {
+        env.current_contract_address().require_auth();
+        Self::validate_expiry(&env, valid_until_ledger)?;
+        let mut policy = Self::policy_of(&env, &signer).ok_or(AccError::UnknownSigner)?;
+        policy.valid_until_ledger = valid_until_ledger;
+        Self::store(&env, &signer, &policy);
+        Ok(())
+    }
+
+    pub fn revoke_signer(env: Env, signer: SignerId) -> Result<(), AccError> {
+        env.current_contract_address().require_auth();
+        if Self::policy_of(&env, &signer).is_none() {
+            return Err(AccError::UnknownSigner);
+        }
+        env.storage().instance().remove(&DataKey::Signer(signer.clone()));
+        let mut kept = Vec::new(&env);
+        for id in Self::list_signers(env.clone()).iter() {
+            if id != signer {
+                kept.push_back(id);
+            }
+        }
+        env.storage().instance().set(&DataKey::Signers, &kept);
+        Ok(())
+    }
+
+    pub fn get_signer(env: Env, signer: SignerId) -> Option<SignerPolicy> {
+        Self::policy_of(&env, &signer)
+    }
+
+    pub fn list_signers(env: Env) -> Vec<SignerId> {
         env.storage()
             .instance()
-            .get(&DataKey::Policy(signer))
+            .get(&DataKey::Signers)
             .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    fn policy_of(env: &Env, signer: &SignerId) -> Option<SignerPolicy> {
+        env.storage().instance().get(&DataKey::Signer(signer.clone()))
+    }
+
+    fn store(env: &Env, signer: &SignerId, policy: &SignerPolicy) {
+        env.storage().instance().set(&DataKey::Signer(signer.clone()), policy);
+        let mut signers = Self::list_signers(env.clone());
+        if !signers.contains(signer) {
+            signers.push_back(signer.clone());
+            env.storage().instance().set(&DataKey::Signers, &signers);
+        }
+        Self::bump(env);
+    }
+
+    fn ensure_not_master(env: &Env, signer: &SignerId) -> Result<(), AccError> {
+        let SignerId::Ed25519(key) = signer;
+        if *key == Self::master(env.clone()) {
+            return Err(AccError::InvalidPolicy);
+        }
+        Ok(())
+    }
+
+    fn validate_expiry(env: &Env, valid_until_ledger: Option<u32>) -> Result<(), AccError> {
+        match valid_until_ledger {
+            Some(ledger) if ledger <= env.ledger().sequence() => Err(AccError::InvalidPolicy),
+            _ => Ok(()),
+        }
+    }
+
+    fn validate_rules(env: &Env, rules: &Vec<Rule>) -> Result<(), AccError> {
+        if rules.len() > MAX_RULES {
+            return Err(AccError::InvalidPolicy);
+        }
+        let me = env.current_contract_address();
+        for rule in rules.iter() {
+            // A delegate must never be able to authorize calls on the account itself.
+            if rule.contract == me || rule.args.len() > MAX_ARGS {
+                return Err(AccError::InvalidPolicy);
+            }
+        }
+        Ok(())
     }
 
     fn bump(env: &Env) {
@@ -106,16 +231,20 @@ impl SmartAccount {
 }
 
 fn rule_allows(env: &Env, me: &Address, rule: &Rule, call: &ContractContext) -> bool {
-    if rule.contract != call.contract || rule.function != call.fn_name {
+    if rule.contract != call.contract || rule.function != call.fn_name || rule.args.len() != call.args.len() {
         return false;
     }
-    if !rule.self_arg {
-        return true;
+    for (constraint, arg) in rule.args.iter().zip(call.args.iter()) {
+        let satisfied = match constraint {
+            ArgConstraint::Any => true,
+            ArgConstraint::SelfAddress => Address::try_from_val(env, &arg).map_or(false, |a| a == *me),
+            ArgConstraint::Exact(expected) => arg.to_xdr(env) == expected,
+        };
+        if !satisfied {
+            return false;
+        }
     }
-    match call.args.get(0) {
-        Some(first) => Address::try_from_val(env, &first).map_or(false, |a| a == *me),
-        None => false,
-    }
+    true
 }
 
 #[contractimpl]
@@ -130,6 +259,8 @@ impl CustomAccountInterface for SmartAccount {
         signature: AccSignature,
         auth_contexts: Vec<Context>,
     ) -> Result<(), AccError> {
+        let AccSignature::Ed25519(signature) = signature;
+
         // Traps on an invalid signature.
         env.crypto().ed25519_verify(
             &signature.signer,
@@ -146,11 +277,12 @@ impl CustomAccountInterface for SmartAccount {
             return Ok(());
         }
 
-        let rules: Vec<Rule> = env
-            .storage()
-            .instance()
-            .get(&DataKey::Policy(signature.signer))
-            .ok_or(AccError::UnknownSigner)?;
+        let policy = Self::policy_of(&env, &SignerId::Ed25519(signature.signer)).ok_or(AccError::UnknownSigner)?;
+        if let Some(last_valid_ledger) = policy.valid_until_ledger {
+            if env.ledger().sequence() > last_valid_ledger {
+                return Err(AccError::SignerExpired);
+            }
+        }
         let me = env.current_contract_address();
 
         // Every invocation in the authorized tree (root and sub-invocations)
@@ -163,7 +295,7 @@ impl CustomAccountInterface for SmartAccount {
             if call.contract == me {
                 return Err(AccError::NotAllowed);
             }
-            if !rules.iter().any(|rule| rule_allows(&env, &me, &rule, &call)) {
+            if !policy.rules.iter().any(|rule| rule_allows(&env, &me, &rule, &call)) {
                 return Err(AccError::NotAllowed);
             }
         }
