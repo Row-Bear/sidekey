@@ -1,6 +1,7 @@
 extern crate std;
 
 use ed25519_dalek::{Signer, SigningKey};
+use sha2::{Digest, Sha256};
 use soroban_sdk::{
     auth::{Context, ContractContext, ContractExecutable, CreateContractHostFnContext},
     symbol_short,
@@ -491,4 +492,134 @@ fn list_signers_has_no_duplicates_and_tracks_each_signer() {
 fn the_master_is_exposed_by_master() {
     let f = setup();
     assert_eq!(f.client.master(), pubkey(&f.env, &f.master));
+}
+
+// ---- SEP-53 message signatures (wallets that cannot sign auth entries) ----
+
+/// What a wallet signs for `payload` on `account`, built with ordinary strings (not the contract's code).
+fn wallet_message(account: &str, payload: &[u8; 32]) -> std::string::String {
+    let hex: std::string::String = payload.iter().map(|b| std::format!("{b:02x}")).collect();
+    std::format!("Stellar Signed Message:\nAuthorize {account} payload {hex}")
+}
+
+fn message_signature(f: &Fixture, signer: &SigningKey, account: &str, payload: &BytesN<32>) -> AccSignature {
+    let digest = Sha256::digest(wallet_message(account, &payload.to_array()).as_bytes());
+    AccSignature::Message(Ed25519Signature {
+        signer: pubkey(&f.env, signer),
+        sig: BytesN::from_array(&f.env, &signer.sign(&digest).to_bytes()),
+    })
+}
+
+fn check_with(f: &Fixture, signature: AccSignature, payload: &BytesN<32>, contexts: Vec<Context>) -> CheckResult {
+    f.env.try_invoke_contract_check_auth::<AccError>(&f.client.address, payload, signature.into_val(&f.env), &contexts)
+}
+
+fn claim_ctx(f: &Fixture) -> Vec<Context> {
+    vec![&f.env, call(&f.env, &f.sim, symbol_short!("claim"), &f.client.address)]
+}
+
+fn account_text(f: &Fixture) -> std::string::String {
+    let text = f.client.address.to_string();
+    let mut buf = [0u8; 56];
+    text.copy_into_slice(&mut buf);
+    std::string::String::from_utf8(buf.to_vec()).unwrap()
+}
+
+#[test]
+fn master_message_signature_authorizes_any_call() {
+    let f = setup();
+    let payload = BytesN::from_array(&f.env, &[7u8; 32]);
+    let other = Address::generate(&f.env);
+    let ctx = vec![&f.env, call(&f.env, &other, symbol_short!("withdraw"), &other)];
+    let sig = message_signature(&f, &f.master, &account_text(&f), &payload);
+    assert_eq!(check_with(&f, sig, &payload, ctx), Ok(()));
+}
+
+#[test]
+fn message_signature_is_for_one_payload_only() {
+    let f = setup();
+    let signed_for = BytesN::from_array(&f.env, &[7u8; 32]);
+    let presented_with = BytesN::from_array(&f.env, &[8u8; 32]);
+    let sig = message_signature(&f, &f.master, &account_text(&f), &signed_for);
+    assert!(check_with(&f, sig, &presented_with, claim_ctx(&f)).is_err());
+}
+
+#[test]
+fn message_signature_is_for_one_account_only() {
+    let f = setup();
+    let payload = BytesN::from_array(&f.env, &[7u8; 32]);
+    // The master signed the same payload, but for a different account's message.
+    let elsewhere = Address::generate(&f.env).to_string();
+    let mut buf = [0u8; 56];
+    elsewhere.copy_into_slice(&mut buf);
+    let other_account = std::string::String::from_utf8(buf.to_vec()).unwrap();
+    assert_ne!(other_account, account_text(&f));
+    let sig = message_signature(&f, &f.master, &other_account, &payload);
+    assert!(check_with(&f, sig, &payload, claim_ctx(&f)).is_err());
+}
+
+#[test]
+fn message_must_have_the_exact_text() {
+    let f = setup();
+    let payload = BytesN::from_array(&f.env, &[0xabu8; 32]);
+    let account = account_text(&f);
+    let hex: std::string::String = payload.to_array().iter().map(|b| std::format!("{b:02x}")).collect();
+    let variants = [
+        std::format!("Stellar Signed Message:\nAuthorize {account} payload {}", hex.to_uppercase()),
+        std::format!("Authorize {account} payload {hex}"),
+        std::format!("Stellar Signed Message:\nAuthorize {account} payload {hex}\n"),
+        std::format!("Stellar Signed Message:\nauthorize {account} payload {hex}"),
+    ];
+    // The uppercase variant must differ from the correct text, or this case would prove nothing.
+    assert_ne!(variants[0], wallet_message(&account, &payload.to_array()));
+    for text in variants {
+        let digest = Sha256::digest(text.as_bytes());
+        let sig = AccSignature::Message(Ed25519Signature {
+            signer: pubkey(&f.env, &f.master),
+            sig: BytesN::from_array(&f.env, &f.master.sign(&digest).to_bytes()),
+        });
+        assert!(check_with(&f, sig, &payload, claim_ctx(&f)).is_err(), "accepted: {text:?}");
+    }
+}
+
+#[test]
+fn the_two_signature_kinds_are_not_interchangeable() {
+    let f = setup();
+    let payload = BytesN::from_array(&f.env, &[7u8; 32]);
+
+    // A raw signature over the payload, presented as a message signature.
+    let raw = f.master.sign(&payload.to_array()).to_bytes();
+    let as_message = AccSignature::Message(Ed25519Signature { signer: pubkey(&f.env, &f.master), sig: BytesN::from_array(&f.env, &raw) });
+    assert!(check_with(&f, as_message, &payload, claim_ctx(&f)).is_err());
+
+    // A message signature, presented as a raw payload signature.
+    let digest = Sha256::digest(wallet_message(&account_text(&f), &payload.to_array()).as_bytes());
+    let msg_sig = f.master.sign(&digest).to_bytes();
+    let as_raw = AccSignature::Ed25519(Ed25519Signature { signer: pubkey(&f.env, &f.master), sig: BytesN::from_array(&f.env, &msg_sig) });
+    assert!(check_with(&f, as_raw, &payload, claim_ctx(&f)).is_err());
+}
+
+#[test]
+fn delegate_message_signatures_still_go_through_the_policy() {
+    let f = setup();
+    allow_delegate_claim(&f);
+    let payload = BytesN::from_array(&f.env, &[7u8; 32]);
+    let account = account_text(&f);
+
+    let allowed = message_signature(&f, &f.delegate, &account, &payload);
+    assert_eq!(check_with(&f, allowed, &payload, claim_ctx(&f)), Ok(()));
+
+    let withdraw = vec![&f.env, call(&f.env, &f.sim, symbol_short!("withdraw"), &f.client.address)];
+    let refused = message_signature(&f, &f.delegate, &account, &payload);
+    assert_eq!(check_with(&f, refused, &payload, withdraw), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn an_expired_delegate_is_refused_with_a_message_signature_too() {
+    let f = setup();
+    set_delegate(&f, Some(150), vec![&f.env, claim_rule(&f)]);
+    f.env.ledger().set_sequence_number(500);
+    let payload = BytesN::from_array(&f.env, &[7u8; 32]);
+    let sig = message_signature(&f, &f.delegate, &account_text(&f), &payload);
+    assert_eq!(check_with(&f, sig, &payload, claim_ctx(&f)), Err(Ok(AccError::SignerExpired)));
 }

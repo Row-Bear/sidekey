@@ -53,15 +53,18 @@ pauses and asks the browser:
    `pendingSignature { id, signerKind, address, callSummary, preimageXdr, payloadHex }`
    in `GET /api/state`.
 2. The UI (already polling) shows a prompt, then signs:
-   - master (wallet): `StellarWalletsKit.signAuthEntry(preimageXdr)`
+   - master (wallet): `StellarWalletsKit.signAuthEntry(preimageXdr)` where the wallet supports
+     it (Freighter), otherwise `StellarWalletsKit.signMessage(walletMessage(account, payload))`
+     (xBull); both are implemented by the contract (see WP0 findings)
    - passkey delegate: `navigator.credentials.get({ challenge: payload })`, then DER to
      compact low-S
 3. The UI posts `POST /api/signature { id, signature }`. The server builds the signature
    `ScVal`, runs the enforcing simulation, assembles, sponsor-signs and submits as today.
 
 Only the signing source differs, so scenario steps and the CLI runner are unchanged.
-Fallback if a wallet lacks `signAuthEntry`: a `signTransaction` request for flows where the
-G account is the transaction source (for example step 2).
+`signTransaction` is **not** a fallback for calls the smart account authorizes: a wallet signs the
+transaction-envelope hash, while `__check_auth` verifies the auth-entry payload. It only works where
+the G account itself is the authorizer, such as the master's XLM transfer (step 2).
 
 ## Work packages
 
@@ -69,15 +72,34 @@ Suggested order is by value per hour. Each package is shippable on its own.
 
 ### WP0: Spikes (about 1 h)
 
-- [ ] xBull on testnet: does the kit's `signAuthEntry` return a signature over
-      `sha256(preimage)` that the contract's `ed25519_verify` accepts? (SEP-43 says so;
-      confirm with xBull.)
-- [ ] `secp256r1_verify` in `soroban-sdk` 29: signature format, low-S rule, and the CPU cost
-      of the full passkey check in a simulation.
-- [ ] Does a WebAuthn authenticator exist in the dev setup? If not, plan on a Playwright
-      virtual authenticator for tests and a hardware key or phone for the demo.
-- [ ] `contract.Spec` from `@stellar/stellar-sdk` can read a contract's function names and
-      argument types, and encode typed inputs to `ScVal`, for the form builder.
+- [x] **Wallet signing of auth entries.** `signAuthEntry` signs sha256 of the preimage, which
+      equals the payload the contract verifies; a master signature produced that way through a
+      SEP-43 interface is accepted on testnet (`spikes/wallet-sep43/run.ts`). But the Wallets Kit
+      modules for **xBull, Albedo, LOBSTR, Hana, Ledger and Trezor reject `signAuthEntry`**
+      (read from the kit source); Freighter, Hot Wallet, Klever, D'Cent and others implement it.
+- [x] **`signMessage` for wallets without `signAuthEntry`** (decided: implemented, see below).
+- [~] `secp256r1_verify` in `soroban-sdk` 29: crate `spikes/passkey-verify` builds (4.4 KB) with
+      tests against 32 real browser assertions (low-S rule, bad-assertion cases, CPU cost
+      against ed25519). **The test run was interrupted and has not been re-run yet.**
+- [x] A WebAuthn authenticator is available in the dev browser: the embedded Chrome exposes a
+      CDP virtual authenticator (ES256, user verification), and 32 real assertions are saved in
+      `spikes/passkey-verify/assertions.json`. A real device is still needed for the demo.
+- [x] `contract.Spec` reads a contract's functions and encodes typed inputs; used by WP2.
+
+**`signMessage` findings.** xBull signs `sha256("Stellar Signed Message:\n" + message)` (SEP-53) and
+returns the signature plus the full text it signed. It reads the message as **base64 when it looks
+like base64, otherwise UTF-8**, so a bare 64-character hex payload would be silently decoded into
+different bytes. The contract therefore verifies the text
+`Authorize <account> payload <hex>` (spaces keep it plain text in every wallet), via a new
+`AccSignature::Message` variant. Implemented with 7 contract tests (mutation-checked: wrong
+payload, wrong account, exact text, kinds not interchangeable, delegates still under policy and
+expiry), `packages/core/src/wallet.ts` with mock xBull-style and strict-SEP-53 wallets, and a
+testnet run where set_expiry, deposit (nested transfer), claim and withdraw were all authorized
+by message signatures (`spikes/wallet-sep43/message.ts`). The client checks the wallet's signature
+locally before sending, accepts base64 or hex, and catches the base64 trap with a clear error.
+**Not yet verified against the real xBull extension**: that needs its popup and a funded wallet
+account, so it moves to WP4 as a manual check (how it encodes the signature is unconfirmed; the
+client accepts both common encodings).
 
 ### WP1: Contract v2 with expiry (goal 1; about 3 h) — done
 
@@ -157,9 +179,15 @@ Suggested order is by value per hour. Each package is shippable on its own.
 - [ ] **Wallet mode**: "Create smart account for my wallet" deploys a smart account whose
       master is the connected address. No master secret is stored; the master authorizer is
       the remote signer from WP3. The session state records `masterMode: wallet`.
-- [ ] Master steps (1, 2, 3, 4, 7 and policy edits) prompt the wallet via `signAuthEntry`.
-      Step 2 uses the wallet's classic auth entry; if `signAuthEntry` is unavailable, send
-      the transaction to the wallet with `signTransaction` (wallet as source).
+- [ ] Master steps (1, 3, 4, 7 and policy edits) prompt the wallet with `signMessage` through
+      `walletMessageSigner` (xBull) or `signAuthEntry` where supported (Freighter). Step 2 is the
+      G account's own classic authorization: the wallet signs the transaction with
+      `signTransaction` (wallet as source).
+- [ ] Manual check with the real xBull extension on testnet: message text shown, signature
+      encoding, and that the local signature check passes.
+- [ ] Show the exact message in the signing modal; the wallet will display
+      `Authorize <account> payload <hash>`, which a user cannot tell apart per call, so the
+      dashboard must show the call summary before the wallet prompt.
 - [ ] Keep **demo mode** (server-held master) as a toggle for headless and fallback runs.
 - Done when: with xBull connected, the master steps are signed in the wallet and the demo
   completes on a new smart account owned by the wallet's G address.
@@ -201,9 +229,11 @@ WP3 is cheap and unlocks both wallet and passkey, so do it right after WP2.
 
 ## Risks and open items
 
-- **xBull and `signAuthEntry`**: support is wallet-specific. The spike confirms it; the
-  fallback is `signTransaction` with the wallet as source, or another wallet through the
-  same kit (Freighter, Albedo).
+- **Wallet support differs**: xBull cannot `signAuthEntry`; it uses `signMessage` (above).
+  Freighter supports `signAuthEntry`. The message path is verified with mocks and on-chain, but
+  not yet with the real xBull extension.
+- **Blind signing**: a wallet shows `Authorize <account> payload <hash>`, so the user cannot
+  see which call they approve; the dashboard's call summary is the only readable description.
 - **Passkey signature format**: DER to compact conversion and low-S normalization are the
   usual failure points. Test against real authenticator output early.
 - **Passkey cost**: `secp256r1_verify` plus JSON checking may use a large share of the CPU

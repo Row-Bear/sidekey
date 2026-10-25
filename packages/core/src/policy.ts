@@ -56,6 +56,15 @@ export function ed25519SignatureScVal(rawPublicKey: Uint8Array, signature: Uint8
   );
 }
 
+/** `Message(Ed25519Signature { sig, signer })`: a SEP-53 message signature (see `walletMessage`). */
+export function messageSignatureScVal(rawPublicKey: Uint8Array, signature: Uint8Array): xdr.ScVal {
+  const bytes = (b: Uint8Array) => xdr.ScVal.scvBytes(Buffer.from(b));
+  return variant(
+    "Message",
+    xdr.ScVal.scvMap([field("sig", bytes(signature)), field("signer", bytes(rawPublicKey))]),
+  );
+}
+
 // ---- Decoding what the contract returns, in a JSON-safe shape for the UI ----
 
 export type ArgConstraintView =

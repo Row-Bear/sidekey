@@ -71,7 +71,11 @@ pub struct Ed25519Signature {
 #[contracttype]
 #[derive(Clone)]
 pub enum AccSignature {
+    /// A signature over the 32-byte authorization payload itself (what `signAuthEntry` produces).
     Ed25519(Ed25519Signature),
+    /// A SEP-53 message signature, for wallets that cannot sign auth entries but can sign messages:
+    /// the signed text is `"Stellar Signed Message:\nAuthorize <this account> payload <hex payload>"`.
+    Message(Ed25519Signature),
 }
 
 #[contracterror]
@@ -230,6 +234,39 @@ impl SmartAccount {
     }
 }
 
+// The exact SEP-53 text a wallet signs for a payload. It deliberately contains spaces: some wallets
+// treat a message as base64 when it looks like base64, and spaces keep it plain text everywhere.
+const MESSAGE_PREFIX: &[u8] = b"Stellar Signed Message:\nAuthorize ";
+const MESSAGE_MIDDLE: &[u8] = b" payload ";
+const ACCOUNT_LEN: usize = 56;
+const MESSAGE_LEN: usize = 34 + ACCOUNT_LEN + 9 + 64;
+
+/// SHA-256 of the SEP-53 message that authorizes `payload` on this account.
+fn message_digest(env: &Env, payload: &BytesN<32>) -> BytesN<32> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut text = [0u8; MESSAGE_LEN];
+    let mut at = 0;
+    text[at..at + MESSAGE_PREFIX.len()].copy_from_slice(MESSAGE_PREFIX);
+    at += MESSAGE_PREFIX.len();
+
+    let account = env.current_contract_address().to_string();
+    // A contract address is always 56 characters; anything else cannot be authorized.
+    if account.len() as usize != ACCOUNT_LEN {
+        panic!("unexpected account address length");
+    }
+    account.copy_into_slice(&mut text[at..at + ACCOUNT_LEN]);
+    at += ACCOUNT_LEN;
+
+    text[at..at + MESSAGE_MIDDLE.len()].copy_from_slice(MESSAGE_MIDDLE);
+    at += MESSAGE_MIDDLE.len();
+    for byte in payload.to_array() {
+        text[at] = HEX[(byte >> 4) as usize];
+        text[at + 1] = HEX[(byte & 15) as usize];
+        at += 2;
+    }
+    env.crypto().sha256(&Bytes::from_slice(env, &text)).to_bytes()
+}
+
 fn rule_allows(env: &Env, me: &Address, rule: &Rule, call: &ContractContext) -> bool {
     if rule.contract != call.contract || rule.function != call.fn_name || rule.args.len() != call.args.len() {
         return false;
@@ -259,14 +296,22 @@ impl CustomAccountInterface for SmartAccount {
         signature: AccSignature,
         auth_contexts: Vec<Context>,
     ) -> Result<(), AccError> {
-        let AccSignature::Ed25519(signature) = signature;
-
         // Traps on an invalid signature.
-        env.crypto().ed25519_verify(
-            &signature.signer,
-            &signature_payload.to_bytes().into(),
-            &signature.sig,
-        );
+        let signature = match signature {
+            AccSignature::Ed25519(signature) => {
+                env.crypto().ed25519_verify(
+                    &signature.signer,
+                    &signature_payload.to_bytes().into(),
+                    &signature.sig,
+                );
+                signature
+            }
+            AccSignature::Message(signature) => {
+                let digest = message_digest(&env, &signature_payload.to_bytes());
+                env.crypto().ed25519_verify(&signature.signer, &digest.into(), &signature.sig);
+                signature
+            }
+        };
 
         let master: BytesN<32> = env
             .storage()
