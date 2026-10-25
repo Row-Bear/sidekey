@@ -7,5 +7,6 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 export default defineConfig({
   plugins: [react(), demoApi(repoRoot)],
-  server: { port: 5173 },
+  // The demo API can spend testnet funds and rewrite .env, so it is never exposed on the network.
+  server: { host: "localhost", port: 5173 },
 });

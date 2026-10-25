@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { parse } from "dotenv";
+import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { nativeToScVal } from "@stellar/stellar-sdk";
@@ -15,6 +17,7 @@ import {
   STEPS,
 } from "../../packages/core/src/index.ts";
 import type { DemoState, PolicyRule, RunRequest } from "../src/api-types.ts";
+import { checkApiRequest } from "./guard.ts";
 
 const MAX_LOG_LINES = 60;
 
@@ -47,6 +50,10 @@ export function demoApi(repoRoot: string): Plugin {
   const resultsPath = join(repoRoot, "demo-run.json");
   const envPath = join(repoRoot, ".env");
 
+  // `.env` is the source of truth: the CLI (`npm run poc -- --fresh`) can replace the master and
+  // smart account while this server runs, so read it per request instead of trusting process.env.
+  const currentContext = () => createScenarioContext({ ...process.env, ...parse(readFileSync(envPath)) });
+
   const run: DemoState["run"] = { busy: false, currentStep: null, label: null, log: [], lastError: null };
   const log = (message: string) => {
     run.log.push(`${new Date().toLocaleTimeString("en-GB")}  ${message}`);
@@ -54,7 +61,7 @@ export function demoApi(repoRoot: string): Plugin {
   };
 
   async function buildState(): Promise<DemoState> {
-    const ctx = createScenarioContext();
+    const ctx = currentContext();
     const state: DemoState = {
       network: "testnet",
       accounts: {
@@ -95,7 +102,7 @@ export function demoApi(repoRoot: string): Plugin {
 
       const from = request.action === "steps" ? request.from : 1;
       const to = request.action === "steps" ? request.to : STEPS.length;
-      const ctx = createScenarioContext();
+      const ctx = currentContext();
       for (let step = from; step <= to; step++) {
         run.currentStep = step;
         run.label = `Step ${step}/${STEPS.length}: ${STEPS[step - 1].name}`;
@@ -126,6 +133,8 @@ export function demoApi(repoRoot: string): Plugin {
     name: "demo-api",
     configureServer(server) {
       server.middlewares.use("/api", async (req, res) => {
+        const guard = checkApiRequest(req.method, req.headers);
+        if (!guard.allowed) return json(res, guard.status, { error: guard.reason });
         try {
           const path = (req.url ?? "/").split("?")[0];
           if (req.method === "GET" && path === "/state") return json(res, 200, await buildState());

@@ -80,6 +80,7 @@ lists every variable.
 | `npm run web` | Dashboard with live balances, policy, timeline and a **Run full demo** button |
 | `npm run export:run` | Writes `docs/recorded-run.md` from `demo-run.json` |
 | `npm run typecheck` | Typechecks the Node code and the web app |
+| `npm run test:contract` / `npm run test:web` | Contract unit tests / API request-guard tests |
 
 `--fresh` and **Run full demo** replace `MASTER_*` and `SMART_ACCOUNT_ID` in
 `.env`; the previous master secret is not kept, so funds left on an older smart
@@ -124,8 +125,9 @@ This is a hackathon PoC, not audited, and testnet only.
   beyond `self_arg`.
 - The contract extends its own storage lifetime to about 30 days on deploy and on
   `add_policy` only; a long-idle account would need its TTL extended.
-- The dashboard's run endpoint is a dev-server feature that holds testnet
-  secrets server side. Do not expose it publicly.
+- The dashboard's run endpoint is a dev-server feature that holds testnet secrets server
+  side. It binds to localhost and refuses cross-origin and non-JSON requests, but do not
+  expose it publicly.
 
 ## References
 

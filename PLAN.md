@@ -160,7 +160,8 @@ fallback if live testnet misbehaves.
 - [x] Capture a recorded run (tx hashes) as a fallback: `docs/recorded-run.md`, exported
       with `npm run export:run` from a clean `npm run poc -- --fresh` run (all 7 steps
       as expected on one fresh account).
-- [ ] Stretch: policy expiry or per-delegate spend limit.
+- [ ] Stretch: policy expiry, per-argument policy rules, wallet connection and a passkey
+      delegate. See [STRETCH_PLAN.md](STRETCH_PLAN.md).
 
 ## Risks
 
