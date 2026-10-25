@@ -195,8 +195,11 @@ fn measure_cost_against_the_ed25519_check_the_account_uses_today() {
     t.call(a, sig).unwrap().unwrap();
     let full = t.env.cost_estimate().resources();
 
-    let message = Bytes::from_slice(&t.env, &[7u8; 69]);
-    t.client.crypto_only(&public_key(&t.env, &t.fx), &message, &BytesN::from_array(&t.env, &sig)).ok();
+    // The bytes the passkey really signed, so only the hashing and the host call are measured.
+    let client_hash = t.env.crypto().sha256(&Bytes::from_slice(&t.env, &b64(&a.client_data_json)));
+    let mut message = Bytes::from_slice(&t.env, &b64(&a.authenticator_data));
+    message.append(&Bytes::from(client_hash.to_bytes()));
+    t.client.crypto_only(&public_key(&t.env, &t.fx), &message, &BytesN::from_array(&t.env, &sig));
     let crypto_only = t.env.cost_estimate().resources();
 
     let key = SigningKey::from_bytes(&[1; 32]);

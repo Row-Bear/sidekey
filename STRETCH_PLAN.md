@@ -70,7 +70,7 @@ the G account itself is the authorizer, such as the master's XLM transfer (step 
 
 Suggested order is by value per hour. Each package is shippable on its own.
 
-### WP0: Spikes (about 1 h)
+### WP0: Spikes (about 1 h) — done
 
 - [x] **Wallet signing of auth entries.** `signAuthEntry` signs sha256 of the preimage, which
       equals the payload the contract verifies; a master signature produced that way through a
@@ -78,9 +78,25 @@ Suggested order is by value per hour. Each package is shippable on its own.
       modules for **xBull, Albedo, LOBSTR, Hana, Ledger and Trezor reject `signAuthEntry`**
       (read from the kit source); Freighter, Hot Wallet, Klever, D'Cent and others implement it.
 - [x] **`signMessage` for wallets without `signAuthEntry`** (decided: implemented, see below).
-- [~] `secp256r1_verify` in `soroban-sdk` 29: crate `spikes/passkey-verify` builds (4.4 KB) with
-      tests against 32 real browser assertions (low-S rule, bad-assertion cases, CPU cost
-      against ed25519). **The test run was interrupted and has not been re-run yet.**
+- [x] **`secp256r1_verify` in `soroban-sdk` 29** (`spikes/passkey-verify`, 4 tests on 32 real
+      browser assertions from a Chrome virtual authenticator, ES256):
+      - **Low-S is mandatory.** Exactly half of the real signatures (16 of 32) were rejected by
+        the host as high-S; after normalizing to low-S all 32 verify, and the mirrored high-S form
+        of every signature is rejected. The browser must normalize before sending (DER to
+        compact `r||s`, then `s = n - s` when `s > n/2`).
+      - **Cost is small.** The full check (assertion checks, two sha256, `secp256r1_verify`) uses
+        about 3.4 M CPU instructions and 1.2 MB of memory, 0.8% of the testnet per-transaction
+        limit (400 M instructions, 40 MB). The ed25519 check used today costs about 0.7 M.
+      - **Format.** The 65-byte key is the last 65 bytes of the 91-byte SPKI from
+        `getPublicKey()`; `authenticatorData` is 37 bytes with flags `0x05` (present and
+        verified); `clientDataJSON` is about 120 bytes with `"type":"webauthn.get"` and the
+        base64url challenge.
+      - **Rejected as intended**: wrong challenge, wrong rp id hash, missing present or verified
+        flag, truncated or empty or oversized data, a `webauthn.create` ceremony, tampered
+        client data (signature trap) and another key.
+      - **For WP5:** the spike finds `"challenge":"<payload>"` anywhere in `clientDataJSON`.
+        Tighten that to the canonical position (right after `"type":"webauthn.get",`) and cap
+        the size, so no other field can carry a look-alike challenge.
 - [x] A WebAuthn authenticator is available in the dev browser: the embedded Chrome exposes a
       CDP virtual authenticator (ES256, user verification), and 32 real assertions are saved in
       `spikes/passkey-verify/assertions.json`. A real device is still needed for the demo.
