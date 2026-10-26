@@ -263,3 +263,17 @@ textarea { font: inherit; font-size: 13px; color: var(--text); background: #0d11
 .mode-switch { display: flex; gap: 6px; }
 .wallet-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; font-size: 14px; }
 .tag.ok { color: var(--ok); border-color: rgba(63, 185, 80, 0.5); }
+
+.saved-calls { padding: 12px 20px; }
+.saved-calls h2 { margin-bottom: 8px; }
+.saved-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.saved-card { display: flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 10px; padding: 4px 6px 4px 4px; }
+.saved-card:hover { border-color: var(--accent); }
+.saved-card input { flex: 1; min-width: 0; }
+.saved-run { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; background: transparent; color: var(--text); border: 0; padding: 6px 8px; text-align: left; }
+.saved-run strong, .saved-run span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-tools { display: flex; flex-direction: column; }
+.icon-btn { background: transparent; color: var(--muted, #8b949e); border: 0; padding: 0 4px; font-size: 12px; line-height: 1.4; }
+.icon-btn:hover { color: var(--text); }
+.save-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.save-form input { flex: 1; min-width: 140px; }

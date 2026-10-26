@@ -10,6 +10,7 @@ import { defaultFunction, describeSignature } from "./functions";
 import { Info } from "./Info";
 import { delegatesFirst } from "./signers";
 import { examplesFor } from "./examples";
+import { autoCallName, MAX_CALL_LABEL } from "./savedCalls";
 
 function signerOptionLabel(signer: SignerView, latestLedger: number, demo: boolean): string {
   if (signer.label === "master") return `master ${shortAddress(signer.address)}: may authorize anything`;
@@ -56,7 +57,7 @@ function PreviewBox({ preview }: { preview: PreviewResult | "loading" | null }) 
   );
 }
 
-export function CallBuilder({ demo = true, walletReady = true, data, busy, version, contract, functions, loading, nameOf, onSend }: {
+export function CallBuilder({ demo = true, walletReady = true, data, busy, version, contract, functions, loading, nameOf, onSend, onSave }: {
   /** The guided demo can sign with the keys it holds; the plain page always signs in the browser (wallet, passkey or pasted). */
   demo?: boolean;
   /** Whether the master can sign now (the wallet that owns the account is connected). The delegate's passkey needs no wallet. */
@@ -71,6 +72,8 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   loading: boolean;
   nameOf: (id: string) => string;
   onSend: (call: CallRequest, via?: SigningVia) => void;
+  /** When given, the builder offers to save the call; it throws a readable message when it cannot be saved. */
+  onSave?: (label: string, call: CallRequest) => void;
 }) {
   const simulator = data?.simulator ?? "";
   const account = data?.smartAccount ?? "";
@@ -80,6 +83,8 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   const [preview, setPreview] = useState<PreviewResult | "loading" | null>(null);
   const [via, setVia] = useState<SigningVia | "demo">(demo ? "demo" : "browser");
   const presetArgs = useRef<string[] | null>(null);
+  const [saveName, setSaveName] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     if (data && signerId === "") setSignerId(data.signers.find((s) => s.label === "delegate")?.id ?? "master");
@@ -191,9 +196,34 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
         <button disabled={!canSend} onClick={() => request && onSend(request, via === "browser" ? "browser" : undefined)}>
           {busy ? "Working…" : rejected ? "Send anyway (expect a rejection)" : "Send"}
         </button>
+        {onSave && (
+          <button type="button" className="ghost" disabled={request === null || busy} onClick={() => { setSaveError(""); setSaveName(request ? autoCallName(request.function, nameOf(request.contract)) : ""); }}>
+            Save call
+          </button>
+        )}
         {demo && signer && !signer.hasKey && !signer.viaBrowser && via !== "browser" && <span className="muted small">This demo holds no key for that signer.</span>}
         {signer?.viaBrowser && <span className="muted small">{signer.kind === "passkey" ? "Signed with your passkey." : "Signed in your wallet."}</span>}
       </div>
+      {onSave && saveName !== null && (
+        <form
+          className="save-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!request) return;
+            try {
+              onSave(saveName, request);
+              setSaveName(null);
+            } catch (err) {
+              setSaveError(err instanceof Error ? err.message : String(err));
+            }
+          }}
+        >
+          <input autoFocus value={saveName} maxLength={MAX_CALL_LABEL} aria-label="Name for the saved call" onChange={(e) => setSaveName(e.target.value)} />
+          <button type="submit">Save</button>
+          <button type="button" className="ghost" onClick={() => setSaveName(null)}>Cancel</button>
+          {saveError && <span className="error small">{saveError}</span>}
+        </form>
+      )}
     </section>
   );
 }

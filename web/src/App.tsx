@@ -26,6 +26,8 @@ import { PasskeyPanel } from "./PasskeyPanel";
 import { passkeySigner } from "./passkey";
 import { PolicyEditor } from "./PolicyEditor";
 import { PolicyTable } from "./PolicyTable";
+import { SavedCallCards } from "./SavedCallCards";
+import { useSavedCalls } from "./savedCalls";
 import { SigningModal } from "./SigningModal";
 import { Spinner } from "./Spinner";
 import { useWallet } from "./wallet";
@@ -280,6 +282,7 @@ export default function App({ variant }: { variant: Variant }) {
   }, [busy]);
   const { data: signersData, error: signersError } = useSigners(signersVersion, demo);
   const book = useAddressBook(signersData);
+  const savedCalls = useSavedCalls(signersData?.smartAccount ?? "");
   // One contract for both the policy editor and the call builder; the simulator is the starting choice.
   const [contract, setContract] = useState("");
   const defaultedContract = useRef(false);
@@ -434,6 +437,16 @@ export default function App({ variant }: { variant: Variant }) {
           )}
           {(demo || ready) && (
             <>
+          {!demo && signersData && (
+            <SavedCallCards
+              saved={savedCalls}
+              signers={signersData.signers}
+              nameOf={book.nameOf}
+              busy={busy}
+              walletReady={walletOwns}
+              onRun={(call) => void start({ action: "call", call, via: "browser" })}
+            />
+          )}
           <div className="grid">
             {demo && <Accounts state={state} />}
             {/* On the plain page the policy sits on the left, directly above the policy editor. */}
@@ -470,7 +483,7 @@ export default function App({ variant }: { variant: Variant }) {
                 </p>
               </section>
             )}
-            <CallBuilder demo={demo} walletReady={walletOwns} data={signersData} busy={busy} version={signersVersion} contract={contract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onSend={(call, via) => void start({ action: "call", call, via })} />
+            <CallBuilder demo={demo} walletReady={walletOwns} data={signersData} busy={busy} version={signersVersion} contract={contract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onSend={(call, via) => void start({ action: "call", call, via })} onSave={demo ? undefined : savedCalls.save} />
           </div>
             </>
           )}
