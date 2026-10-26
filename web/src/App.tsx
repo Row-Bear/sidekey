@@ -17,6 +17,8 @@ import { CallHistory } from "./CallHistory";
 import { useSigners } from "./hooks";
 import { PolicyEditor } from "./PolicyEditor";
 import { SigningModal } from "./SigningModal";
+import { useWallet } from "./wallet";
+import { WalletPanel } from "./WalletPanel";
 
 const STATUS_LABEL: Record<StepStatus, string> = {
   pending: "Not run",
@@ -230,6 +232,7 @@ export default function App() {
     wasBusy.current = busy;
   }, [busy]);
   const { data: signersData, error: signersError } = useSigners(signersVersion);
+  const wallet = useWallet();
 
   useEffect(() => {
     void refresh();
@@ -284,6 +287,17 @@ export default function App() {
         <>
           {state.run.label && <p className="banner running">{state.run.label}</p>}
           {state.run.lastError && <p className="error banner">{state.run.lastError}</p>}
+          <WalletPanel
+            wallet={wallet}
+            state={state}
+            busy={busy}
+            version={signersVersion}
+            onStart={(request) => void start(request)}
+            onChanged={() => {
+              void refresh();
+              setSignersVersion((v) => v + 1);
+            }}
+          />
           <div className="grid">
             <Accounts state={state} />
             <Balances state={state} />
@@ -330,7 +344,7 @@ export default function App() {
             </section>
           )}
 
-          {state.pendingSignatures[0] && <SigningModal request={state.pendingSignatures[0]} onDone={() => void refresh()} />}
+          {state.pendingSignatures[0] && <SigningModal request={state.pendingSignatures[0]} signers={wallet.signers} onDone={() => void refresh()} />}
           {signersError && <p className="error banner">{signersError}</p>}
           <div className="grid2">
             <PolicyEditor data={signersData} busy={busy} onApply={(policy, via) => void start({ action: "policy", policy, via })} />

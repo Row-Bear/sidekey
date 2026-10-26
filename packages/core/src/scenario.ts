@@ -1,9 +1,11 @@
 import { Address, Keypair, nativeToScVal, rpc, type xdr } from "@stellar/stellar-sdk";
-import { Authorizer, ChainContext, invoke, InvokeResult, read } from "./chain.js";
+import { Authorizer, ChainContext, invoke, invokeAsSource, InvokeResult, read } from "./chain.js";
 import { DEFAULT_RPC_URL, NATIVE_TOKEN_ID, requireEnv, STROOPS_PER_XLM } from "./config.js";
 import { optionLedgerScVal, parseSignerPolicy, rulesScVal, signerIdScVal, type SignerPolicyView } from "./policy.js";
 
 export const FUND_AMOUNT = 9_500n * STROOPS_PER_XLM;
+/** What the master keeps for fees and the account reserve while funding. */
+const FUNDING_HEADROOM = 2n * STROOPS_PER_XLM;
 
 // Testnet closes a ledger roughly every 5 seconds.
 export const LEDGERS_PER_MINUTE = 12;
@@ -16,6 +18,13 @@ export const SHORT_VALIDITY_LEDGERS = LEDGERS_PER_MINUTE;
 export type RemoteSign = (preimageXdr: string, payload: Uint8Array) => Promise<xdr.ScVal>;
 
 export interface ScenarioContext extends ChainContext {
+  /**
+   * True when the master is a connected wallet: `master` then has an address but no secret, and
+   * everything the master signs goes through `remoteSigners` or `remoteTransactionSigner`.
+   */
+  walletMaster: boolean;
+  /** Gets a transaction signed by the master G account (a wallet), for calls it authorizes as itself. */
+  remoteTransactionSigner?: (unsignedXdr: string, summary: string[]) => Promise<string>;
   /**
    * When set for a role, that role's smart-account signatures come from here instead of the
    * server-held key. Calls the G account itself must authorize (step 2) still need the key.
@@ -31,11 +40,13 @@ export interface ScenarioContext extends ChainContext {
 
 export function createScenarioContext(env: Record<string, string | undefined> = process.env): ScenarioContext {
   const rpcUrl = env.RPC_URL ?? DEFAULT_RPC_URL;
+  const walletMaster = env.MASTER_MODE === "wallet";
   return {
+    walletMaster,
     rpcUrl,
     server: new rpc.Server(rpcUrl),
     sponsor: Keypair.fromSecret(requireEnv("SPONSOR_SECRET", env)),
-    master: Keypair.fromSecret(requireEnv("MASTER_SECRET", env)),
+    master: walletMaster ? Keypair.fromPublicKey(requireEnv("MASTER_PUBLIC", env)) : Keypair.fromSecret(requireEnv("MASTER_SECRET", env)),
     delegate: Keypair.fromSecret(requireEnv("DELEGATE_SECRET", env)),
     smartAccountId: requireEnv("SMART_ACCOUNT_ID", env),
     simId: requireEnv("YIELD_SIM_CONTRACT_ID", env),
@@ -86,6 +97,9 @@ const xlm = (stroops: bigint) => `${(Number(stroops) / Number(STROOPS_PER_XLM)).
 
 const smartAuth = (ctx: ScenarioContext, who: "master" | "delegate"): Authorizer => {
   const remote = ctx.remoteSigners?.[who];
+  if (who === "master" && ctx.walletMaster && !remote) {
+    throw new Error("The master is a connected wallet: its signatures must come from the wallet, not the server");
+  }
   return remote
     ? { kind: "smart-remote", address: ctx.smartAccountId, sign: remote }
     : { kind: "smart", address: ctx.smartAccountId, keypair: who === "master" ? ctx.master : ctx.delegate };
@@ -181,14 +195,43 @@ export const STEPS: StepSpec[] = [
     name: "Master account sends 9,500 XLM to the smart account",
     signer: "master",
     expected: "success",
-    run: async (ctx) => ({
-      result: await invoke(ctx, {
-        contractId: ctx.nativeId,
-        method: "transfer",
-        args: [addr(ctx.master.publicKey()), addr(ctx.smartAccountId), i128(FUND_AMOUNT)],
-        authorizers: [{ kind: "classic", address: ctx.master.publicKey(), keypair: ctx.master }],
-      }),
-    }),
+    run: async (ctx) => {
+      const have = await bigintView(ctx, ctx.nativeId, "balance", ctx.master.publicKey());
+      const need = FUND_AMOUNT + FUNDING_HEADROOM;
+      if (have < need) {
+        return {
+          result: {
+            ok: false,
+            stage: "simulation",
+            error: `The master ${ctx.master.publicKey()} has ${xlm(have)} but this step sends ${xlm(FUND_AMOUNT)} and needs about ${xlm(FUNDING_HEADROOM)} for fees and reserve. Fund it, or move XLM back with the call builder.`,
+          },
+        };
+      }
+      const args = [addr(ctx.master.publicKey()), addr(ctx.smartAccountId), i128(FUND_AMOUNT)];
+      if (!ctx.walletMaster) {
+        return {
+          result: await invoke(ctx, {
+            contractId: ctx.nativeId,
+            method: "transfer",
+            args,
+            authorizers: [{ kind: "classic", address: ctx.master.publicKey(), keypair: ctx.master }],
+          }),
+        };
+      }
+      // A wallet cannot sign a bare auth entry for its own G account here, so it signs the whole
+      // transaction instead: it is the source, pays the fee, and its signature is the authorization.
+      if (!ctx.remoteTransactionSigner) throw new Error("No wallet is available to sign the funding transaction");
+      return {
+        result: await invokeAsSource(ctx, {
+          contractId: ctx.nativeId,
+          method: "transfer",
+          args,
+          sourceAddress: ctx.master.publicKey(),
+          signTransaction: ctx.remoteTransactionSigner,
+        }),
+        note: "signed by the wallet as a transaction",
+      };
+    },
   },
   {
     name: "deposit() all XLM into the yield simulator, signed by the master G key",

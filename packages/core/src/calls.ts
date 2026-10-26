@@ -31,6 +31,8 @@ export interface SignerView {
   address: string;
   /** True when this demo holds the key and can sign for it. */
   hasKey: boolean;
+  /** True when this signer's signatures always come from the browser (a connected wallet master). */
+  viaBrowser: boolean;
   registered: boolean;
   /** Null for the master (no rules) and for signers that are not registered. */
   policy: SignerPolicyView | null;
@@ -40,7 +42,8 @@ export interface SignerView {
  * Where a call's signatures come from. By default the demo signs with the keys it holds; a browser
  * provider (wallet, passkey) returns authorizers that ask the browser instead.
  */
-export type SigningSource = (signer: { id: string; label: string; raw: Uint8Array }) => Authorizer[];
+/** Returns null to let the demo sign with a key it holds. */
+export type SigningSource = (signer: { id: string; label: string; raw: Uint8Array }) => Authorizer[] | null;
 
 const hexOf = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
 
@@ -69,7 +72,7 @@ export async function listSigners(ctx: ScenarioContext): Promise<SignerView[]> {
   if (!rawKeys.some((k) => hexOf(k) === hexOf(delegateRaw))) rawKeys.push(delegateRaw);
 
   const signers: SignerView[] = [
-    { id: "master", label: "master", address: ctx.master.publicKey(), hasKey: true, registered: true, policy: null },
+    { id: "master", label: "master", address: ctx.master.publicKey(), hasKey: !ctx.walletMaster, viaBrowser: ctx.walletMaster, registered: true, policy: null },
   ];
   for (const raw of rawKeys) {
     const isDelegate = hexOf(raw) === hexOf(delegateRaw);
@@ -79,6 +82,7 @@ export async function listSigners(ctx: ScenarioContext): Promise<SignerView[]> {
       label: isDelegate ? "delegate" : "other",
       address: StrKey.encodeEd25519PublicKey(Buffer.from(raw)),
       hasKey: isDelegate,
+      viaBrowser: false,
       registered: policy !== null,
       policy,
     });
@@ -87,7 +91,8 @@ export async function listSigners(ctx: ScenarioContext): Promise<SignerView[]> {
 }
 
 function keyFor(ctx: ScenarioContext, id: string): Keypair | null {
-  if (id === "master") return ctx.master;
+  // A wallet master has no secret here; its signatures must come from the wallet.
+  if (id === "master") return ctx.walletMaster ? null : ctx.master;
   return id === hexOf(ctx.delegate.rawPublicKey()) ? ctx.delegate : null;
 }
 
@@ -208,8 +213,17 @@ function failure(base: Pick<CallRecord, "kind" | "title" | "signer">, message: s
 export async function runCall(ctx: ScenarioContext, req: CallRequest, signing?: SigningSource): Promise<CallRecord> {
   const signer = parseSigner(req.signer);
   const base = { kind: "call" as const, title: `${req.function}(${req.args.join(", ")})`, signer: labelFor(ctx, signer.id) };
-  const key = signing ? null : keyFor(ctx, signer.id);
-  if (!signing && !key) return failure(base, "This demo does not hold a key for that signer", "signing");
+  const asked = signing?.({ id: signer.id, label: base.signer, raw: signer.raw ?? ctx.master.rawPublicKey() }) ?? null;
+  const key = asked ? null : keyFor(ctx, signer.id);
+  if (!asked && !key) {
+    return failure(
+      base,
+      signer.id === "master" && ctx.walletMaster
+        ? "The master is a connected wallet: sign with the wallet"
+        : "This demo does not hold a key for that signer",
+      "signing",
+    );
+  }
 
   let params;
   try {
@@ -218,9 +232,7 @@ export async function runCall(ctx: ScenarioContext, req: CallRequest, signing?: 
     return failure(base, err instanceof Error ? err.message : String(err), "input");
   }
   try {
-    const authorizers = signing
-      ? signing({ id: signer.id, label: base.signer, raw: signer.raw ?? ctx.master.rawPublicKey() })
-      : authorizersFor(ctx, signer.id, key!);
+    const authorizers = asked ?? authorizersFor(ctx, signer.id, key!);
     const result = await invoke(ctx, { ...params, authorizers });
     return toRecord(base, result.ok ? result : { ...result, error: await explainFailure(ctx, result.error, result.detail) });
   } catch (err) {
@@ -303,9 +315,8 @@ export async function runPolicyOp(ctx: ScenarioContext, op: PolicyOp, signing?: 
     if (signer.id === "master" || !signer.raw) throw new Error("The master has no policy; pick a delegate signer");
     base.title = describePolicyOp(ctx, op);
     const signerId = signerIdScVal(signer.raw);
-    const authorizers = signing
-      ? signing({ id: "master", label: "master", raw: ctx.master.rawPublicKey() })
-      : authorizersFor(ctx, "master", ctx.master);
+    const authorizers = signing?.({ id: "master", label: "master", raw: ctx.master.rawPublicKey() }) ?? null;
+    if (!authorizers && ctx.walletMaster) throw new Error("The master is a connected wallet: sign with the wallet");
 
     let method: string;
     let args: xdr.ScVal[];
@@ -335,7 +346,7 @@ export async function runPolicyOp(ctx: ScenarioContext, op: PolicyOp, signing?: 
         args = [signerId];
         break;
     }
-    return toRecord(base, await invoke(ctx, { contractId: ctx.smartAccountId, method, args, authorizers }));
+    return toRecord(base, await invoke(ctx, { contractId: ctx.smartAccountId, method, args, authorizers: authorizers ?? authorizersFor(ctx, "master", ctx.master) }));
   } catch (err) {
     return failure({ ...base, title: base.title || `Policy edit (${op.op})` }, err instanceof Error ? err.message : String(err), "input");
   }

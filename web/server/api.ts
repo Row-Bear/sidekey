@@ -1,10 +1,12 @@
 import "dotenv/config";
 import { parse } from "dotenv";
+import { StrKey } from "@stellar/stellar-sdk";
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import {
+  accountStatus,
   type Authorizer,
   brokerAuthorizer,
   brokerSigner,
@@ -15,12 +17,16 @@ import {
   contractFunctions,
   CORE_STEP_COUNT,
   createFreshDemoAccount,
+  createWalletAccount,
   createScenarioContext,
   type ExpiryInput,
+  fundWithFriendbot,
   latestLedger,
   listSigners,
   loadCallHistory,
   loadResults,
+  loadSession,
+  NETWORK_PASSPHRASE,
   type PolicyOp,
   previewCall,
   readDelegatePolicy,
@@ -29,6 +35,8 @@ import {
   runStep,
   saveCallRecord,
   saveResult,
+  saveSession,
+  sessionEnv,
   SignatureBroker,
   type SignatureResponse,
   type SigningSource,
@@ -114,12 +122,22 @@ function parseSignatureBody(body: unknown): SignatureBody {
   if ((r.kind === "payload" || r.kind === "message") && isText(r.signature)) {
     return { id: b.id, response: { kind: r.kind, signature: r.signature } };
   }
-  throw new Error('Invalid signature answer: expected response {kind: "payload" | "message", signature} or cancel: true');
+  if (r.kind === "transaction" && isText(r.signedXdr)) return { id: b.id, response: { kind: "transaction", signedXdr: r.signedXdr } };
+  throw new Error(
+    'Invalid signature answer: expected response {kind: "payload" | "message", signature}, {kind: "transaction", signedXdr} or cancel: true',
+  );
+}
+
+function parseAddress(value: unknown): string {
+  if (isText(value) && StrKey.isValidEd25519PublicKey(value)) return value;
+  throw new Error("Invalid wallet address: expected a Stellar G address");
 }
 
 function parseRunRequest(body: unknown): RunRequest {
   const b = body as Partial<RunRequest> & { from?: unknown; to?: unknown; call?: unknown; policy?: unknown; via?: unknown };
   if (b.action === "full" || b.action === "fresh") return { action: b.action };
+  if (b.action === "wallet-account") return { action: "wallet-account", address: parseAddress((b as { address?: unknown }).address) };
+  if (b.action === "wallet-fund") return { action: "wallet-fund", address: parseAddress((b as { address?: unknown }).address) };
   if (b.action === "call") return { action: "call", call: parseCallRequest(b.call), ...parseVia(b.via) };
   if (b.action === "policy") return { action: "policy", policy: parsePolicyOp(b.policy), ...parseVia(b.via) };
   if (b.action === "steps") {
@@ -128,18 +146,29 @@ function parseRunRequest(body: unknown): RunRequest {
     const valid = (n: number) => Number.isInteger(n) && n >= 1 && n <= STEPS.length;
     if (valid(from) && valid(to) && from <= to) return { action: "steps", from, to, ...parseVia(b.via) };
   }
-  throw new Error(`Invalid run request; expected action "full", "fresh", "steps" (from/to in 1-${STEPS.length}), "call" or "policy"`);
+  throw new Error(`Invalid run request; expected action "full", "fresh", "steps" (from/to in 1-${STEPS.length}), "call", "policy", "wallet-account" or "wallet-fund"`);
 }
 
 export function demoApi(repoRoot: string): Plugin {
   const resultsPath = join(repoRoot, "demo-run.json");
   const historyPath = join(repoRoot, "demo-calls.json");
+  const sessionPath = join(repoRoot, "wallet-session.json");
   const broker = new SignatureBroker();
   const envPath = join(repoRoot, ".env");
 
   // `.env` is the source of truth: the CLI (`npm run poc -- --fresh`) can replace the master and
   // smart account while this server runs, so read it per request instead of trusting process.env.
-  const currentContext = () => createScenarioContext({ ...process.env, ...parse(readFileSync(envPath)) });
+  const currentContext = () =>
+    createScenarioContext({ ...process.env, ...parse(readFileSync(envPath)), ...sessionEnv(loadSession(sessionPath)) });
+
+  /** In wallet mode the master's signatures always come from the browser; elsewhere only when asked. */
+  const signingFor = (ctx: ReturnType<typeof currentContext>, via: "browser" | undefined): SigningSource | undefined => {
+    const browser = (signer: { label: string; raw: Uint8Array }): Authorizer[] => [
+      brokerAuthorizer(broker, { account: ctx.smartAccountId, signerRaw: signer.raw, signerLabel: signer.label }),
+    ];
+    if (via === "browser") return browser;
+    return ctx.walletMaster ? (signer) => (signer.id === "master" ? browser(signer) : null) : undefined;
+  };
 
   const run: DemoState["run"] = { busy: false, currentStep: null, label: null, log: [], lastError: null };
   const log = (message: string) => {
@@ -158,6 +187,8 @@ export function demoApi(repoRoot: string): Plugin {
         smartAccount: ctx.smartAccountId,
         simulator: ctx.simId,
       },
+      mode: ctx.walletMaster ? "wallet" : "demo",
+      wallet: loadSession(sessionPath).wallet ?? null,
       snapshot: null,
       delegatePolicy: null,
       latestLedger: null,
@@ -189,9 +220,7 @@ export function demoApi(repoRoot: string): Plugin {
     try {
       if (request.action === "call" || request.action === "policy") {
         const ctx = currentContext();
-        const signing: SigningSource | undefined = request.via === "browser"
-          ? (signer): Authorizer[] => [brokerAuthorizer(broker, { account: ctx.smartAccountId, signerRaw: signer.raw, signerLabel: signer.label })]
-          : undefined;
+        const signing = signingFor(ctx, request.via);
         run.label = request.action === "call"
           ? `Sending ${request.call.function}() as ${request.call.signer === "master" ? "master" : "a delegate"}`
           : "Applying a policy edit as the master";
@@ -202,11 +231,31 @@ export function demoApi(repoRoot: string): Plugin {
         log(`${record.title}: ${record.outcome}${record.error ? ` (${record.error})` : ""}`);
         return;
       }
-      if (request.action === "fresh" || request.action === "full") {
-        run.label = "Creating a fresh master account and smart account";
+      if (request.action === "wallet-fund") {
+        run.label = "Funding the wallet account with Friendbot";
+        await fundWithFriendbot(request.address);
+        log(`Funded ${request.address} with Friendbot`);
+        return;
+      }
+      if (request.action === "wallet-account") {
+        run.label = "Deploying a smart account for the wallet";
         clearResults(resultsPath);
         clearCallHistory(historyPath);
-        await createFreshDemoAccount({ repoRoot, envPath, log });
+        await createWalletAccount({ repoRoot, sessionPath, masterAddress: request.address, log });
+        return;
+      }
+      if (request.action === "fresh" || request.action === "full") {
+        clearResults(resultsPath);
+        clearCallHistory(historyPath);
+        const session = loadSession(sessionPath);
+        if (session.mode === "wallet" && session.wallet) {
+          // The wallet stays the master; only the smart account is new.
+          run.label = "Deploying a fresh smart account for the wallet";
+          await createWalletAccount({ repoRoot, sessionPath, masterAddress: session.wallet.address, log });
+        } else {
+          run.label = "Creating a fresh master account and smart account";
+          await createFreshDemoAccount({ repoRoot, envPath, log });
+        }
       }
       if (request.action === "fresh") return;
 
@@ -214,13 +263,23 @@ export function demoApi(repoRoot: string): Plugin {
       // "full" is the core demo (steps 1-7); the optional expiry steps run on request.
       const to = request.action === "steps" ? request.to : CORE_STEP_COUNT;
       const ctx = currentContext();
-      if (request.action === "steps" && request.via === "browser") {
+      const viaBrowser = request.action === "steps" && request.via === "browser";
+      if (viaBrowser || ctx.walletMaster) {
         const asBrowser = (label: "master" | "delegate", raw: Uint8Array) =>
           brokerSigner(broker, { account: ctx.smartAccountId, signerRaw: raw, signerLabel: label });
-        ctx.remoteSigners = {
-          master: asBrowser("master", ctx.master.rawPublicKey()),
-          delegate: asBrowser("delegate", ctx.delegate.rawPublicKey()),
-        };
+        ctx.remoteSigners = { master: asBrowser("master", ctx.master.rawPublicKey()) };
+        // The delegate's key is held by the demo, so it signs itself unless the browser was asked to.
+        if (viaBrowser) ctx.remoteSigners.delegate = asBrowser("delegate", ctx.delegate.rawPublicKey());
+      }
+      if (ctx.walletMaster) {
+        ctx.remoteTransactionSigner = (transactionXdr, summary) =>
+          broker.requestTransaction({
+            signerRaw: ctx.master.rawPublicKey(),
+            signerLabel: "master",
+            transactionXdr,
+            networkPassphrase: NETWORK_PASSPHRASE,
+            summary,
+          });
       }
       for (let step = from; step <= to; step++) {
         run.currentStep = step;
@@ -261,7 +320,32 @@ export function demoApi(repoRoot: string): Plugin {
           if (req.method === "GET" && path === "/signers") {
             const ctx = currentContext();
             const [signers, ledger] = await Promise.all([listSigners(ctx), latestLedger(ctx)]);
-            return json(res, 200, { smartAccount: ctx.smartAccountId, simulator: ctx.simId, latestLedger: ledger, signers });
+            return json(res, 200, {
+              smartAccount: ctx.smartAccountId,
+              simulator: ctx.simId,
+              nativeToken: ctx.nativeId,
+              master: ctx.master.publicKey(),
+              latestLedger: ledger,
+              signers,
+            });
+          }
+
+          if (req.method === "GET" && path === "/wallet-status") {
+            const address = parseAddress(new URL(req.url ?? "", "http://localhost").searchParams.get("address"));
+            const status = await accountStatus(currentContext().rpcUrl, address);
+            return json(res, 200, status.exists ? { exists: true, stroops: status.stroops.toString() } : { exists: false });
+          }
+
+          if (req.method === "POST" && path === "/mode") {
+            const mode = ((await readBody(req)) as { mode?: unknown }).mode;
+            const session = loadSession(sessionPath);
+            if (mode === "wallet" && !session.wallet) {
+              return json(res, 409, { error: "No wallet smart account yet: connect a wallet and create one first" });
+            }
+            if (mode !== "wallet" && mode !== "demo") return json(res, 400, { error: 'mode must be "demo" or "wallet"' });
+            if (run.busy) return json(res, 409, { error: "A run is in progress" });
+            saveSession(sessionPath, { ...session, mode });
+            return json(res, 200, { mode });
           }
 
           if (req.method === "GET" && path === "/contract-functions") {

@@ -10,6 +10,10 @@ export async function fetchState(): Promise<DemoState> {
 export interface SignersResponse {
   smartAccount: string;
   simulator: string;
+  /** The native XLM token contract. */
+  nativeToken: string;
+  /** The master's G address (a connected wallet in wallet mode). */
+  master: string;
   latestLedger: number;
   signers: SignerView[];
 }
@@ -50,6 +54,17 @@ export async function cancelSignature(id: string, reason?: string): Promise<void
     body: JSON.stringify({ id, cancel: true, reason }),
   });
 }
+
+export type WalletStatus = { exists: false } | { exists: true; stroops: string };
+
+export const fetchWalletStatus = (address: string) => getJson<WalletStatus>(`/api/wallet-status?address=${encodeURIComponent(address)}`);
+
+export const setMasterMode = (mode: "demo" | "wallet") =>
+  getJson<{ mode: string }>("/api/mode", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
 
 export const looksLikeContractId = (text: string) => /^C[A-Z2-7]{55}$/.test(text.trim());
 

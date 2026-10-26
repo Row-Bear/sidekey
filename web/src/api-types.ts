@@ -1,4 +1,4 @@
-import type { CallRecord, CallRequest, PendingSignature, PolicyOp, SignerPolicyView, Snapshot, StepResult } from "@poc/core";
+import type { CallRecord, CallRequest, PendingSignature, PolicyOp, SignerPolicyView, Snapshot, StepResult, WalletAccount } from "@poc/core";
 
 export interface StepMeta {
   n: number;
@@ -18,6 +18,10 @@ export interface DemoState {
     smartAccount: string;
     simulator: string;
   };
+  /** Whose key is the master: the demo's own, or a connected wallet's. */
+  mode: "demo" | "wallet";
+  /** The last wallet smart account, kept when switching back to demo mode. */
+  wallet: WalletAccount | null;
   /** Live on-chain values; null when the RPC read failed (see `readError`). */
   snapshot: Snapshot | null;
   /** The delegate's policy on the account: expiry and rules. Null if it is not registered or unreadable. */
@@ -44,6 +48,8 @@ export interface DemoState {
 export type RunRequest =
   | { action: "full" }
   | { action: "fresh" }
+  | { action: "wallet-account"; address: string }
+  | { action: "wallet-fund"; address: string }
   | { action: "steps"; from: number; to: number; via?: SigningVia }
   | { action: "call"; call: CallRequest; via?: SigningVia }
   | { action: "policy"; policy: PolicyOp; via?: SigningVia };

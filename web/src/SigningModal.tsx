@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { PendingSignature } from "@poc/core";
 import { cancelSignature, shortAddress, submitSignature } from "./api";
-import { browserSigners } from "./signing";
+import type { BrowserSigner } from "./signing";
+import { walletError } from "./wallet";
 
 type Kind = "payload" | "message";
 
@@ -33,7 +34,7 @@ function CopyBox({ label, value }: { label: string; value: string }) {
 }
 
 /** Shown whenever the server is waiting for a signature that only the browser can produce. */
-export function SigningModal({ request, onDone }: { request: PendingSignature; onDone: () => void }) {
+export function SigningModal({ request, signers, onDone }: { request: PendingSignature; signers: BrowserSigner[]; onDone: () => void }) {
   const [kind, setKind] = useState<Kind>("payload");
   const [signature, setSignature] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +52,7 @@ export function SigningModal({ request, onDone }: { request: PendingSignature; o
   }, [request.id]);
 
   const left = secondsLeft(request.expiresAt, now);
-  const automatic = browserSigners.filter((s) => s.appliesTo(request));
+  const automatic = signers.filter((s) => s.appliesTo(request));
 
   const run = async (action: () => Promise<void>) => {
     setWorking(true);
@@ -60,7 +61,7 @@ export function SigningModal({ request, onDone }: { request: PendingSignature; o
       await action();
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(walletError(err));
     } finally {
       setWorking(false);
     }
@@ -71,7 +72,7 @@ export function SigningModal({ request, onDone }: { request: PendingSignature; o
       <div className="modal">
         <h2 id="signing-title">Signature needed</h2>
         <p className="muted small">
-          Sign as <span className={`badge ${request.signer.label === "master" ? "master" : "delegate"}`}>{request.signer.label}</span>{" "}
+          {request.kind === "transaction" ? "Sign the transaction as " : "Sign as "}<span className={`badge ${request.signer.label === "master" ? "master" : "delegate"}`}>{request.signer.label}</span>{" "}
           <code title={request.signer.address}>{shortAddress(request.signer.address)}</code>. Expires in {left}s.
         </p>
 
@@ -99,31 +100,43 @@ export function SigningModal({ request, onDone }: { request: PendingSignature; o
             Produce an ed25519 signature with the key above (a wallet, or <code>stellar</code> tooling), then paste it here
             (base64 or hex).
           </p>
-          <div className="tabs">
-            <button type="button" className={kind === "payload" ? "tab active" : "tab"} onClick={() => setKind("payload")}>
-              Sign the payload
-            </button>
-            <button type="button" className={kind === "message" ? "tab active" : "tab"} onClick={() => setKind("message")}>
-              Sign a SEP-53 message
-            </button>
-          </div>
-          {kind === "payload" ? (
+          {request.kind === "transaction" ? (
             <>
-              <CopyBox label="Payload (32-byte hash, hex)" value={request.payloadHex} />
-              <p className="muted small">What a wallet's signAuthEntry signs: sign these 32 bytes directly.</p>
+              <CopyBox label="Transaction (unsigned XDR)" value={request.transactionXdr} />
+              <p className="muted small">
+                Transaction hash <code>{request.transactionHashHex.slice(0, 16)}…</code>. Sign it with the account above (for
+                example in Stellar Lab) and paste the signed XDR below. The wallet pays its fee.
+              </p>
             </>
           ) : (
             <>
-              <CopyBox label="Message" value={request.message} />
-              <p className="muted small">For wallets with signMessage: it signs sha256("Stellar Signed Message:\n" + message).</p>
+              <div className="tabs">
+                <button type="button" className={kind === "payload" ? "tab active" : "tab"} onClick={() => setKind("payload")}>
+                  Sign the payload
+                </button>
+                <button type="button" className={kind === "message" ? "tab active" : "tab"} onClick={() => setKind("message")}>
+                  Sign a SEP-53 message
+                </button>
+              </div>
+              {kind === "payload" ? (
+                <>
+                  <CopyBox label="Payload (32-byte hash, hex)" value={request.payloadHex} />
+                  <p className="muted small">What a wallet's signAuthEntry signs: sign these 32 bytes directly.</p>
+                </>
+              ) : (
+                <>
+                  <CopyBox label="Message" value={request.message} />
+                  <p className="muted small">For wallets with signMessage: it signs sha256("Stellar Signed Message:\n" + message).</p>
+                </>
+              )}
             </>
           )}
           <label className="field">
-            <span className="field-label">Signature</span>
-            <textarea value={signature} onChange={(e) => setSignature(e.target.value)} rows={2} spellCheck={false} placeholder="base64 or hex" />
+            <span className="field-label">{request.kind === "transaction" ? "Signed transaction XDR" : "Signature"}</span>
+            <textarea value={signature} onChange={(e) => setSignature(e.target.value)} rows={2} spellCheck={false} placeholder={request.kind === "transaction" ? "signed envelope, base64 XDR" : "base64 or hex"} />
           </label>
           <div className="actions">
-            <button disabled={working || signature.trim() === ""} onClick={() => void run(() => submitSignature(request.id, { kind, signature }))}>
+            <button disabled={working || signature.trim() === ""} onClick={() => void run(() => submitSignature(request.id, request.kind === "transaction" ? { kind: "transaction", signedXdr: signature.trim() } : { kind, signature }))}>
               {working ? "Checking…" : "Submit signature"}
             </button>
           </div>

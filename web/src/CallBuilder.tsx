@@ -96,21 +96,23 @@ export function CallBuilder({ data, busy, version, onSend }: {
 
   const example = useMemo(
     () => [
-      { label: "claim(this account)", fn: "claim", args: [account] },
-      { label: "withdraw(this account, 1 XLM)", fn: "withdraw", args: [account, "10000000"] },
+      { label: "claim(this account)", contract: simulator, fn: "claim", args: [account] },
+      { label: "withdraw(this account, 1 XLM)", contract: simulator, fn: "withdraw", args: [account, "10000000"] },
+      // Sends XLM from the smart account back to the master, e.g. to run the demo again from a wallet.
+      { label: "send 1 XLM to the master", contract: data?.nativeToken ?? "", fn: "transfer", args: [account, data?.master ?? "", "10000000"] },
     ],
-    [account],
+    [account, simulator, data?.nativeToken, data?.master],
   );
-  const applyExample = (e: { fn: string; args: string[] }) => {
+  const applyExample = (e: { contract: string; fn: string; args: string[] }) => {
     presetArgs.current = e.args;
-    setContract(simulator);
+    setContract(e.contract);
     setFnName(e.fn);
     setArgs(e.args);
   };
 
   const rejected = preview !== null && preview !== "loading" && preview.status === "rejected";
   // With demo keys only signers the demo holds a key for can send; in the browser anyone can be asked.
-  const canSend = !busy && request !== null && (via === "browser" || signer?.hasKey === true);
+  const canSend = !busy && request !== null && (via === "browser" || signer?.hasKey === true || signer?.viaBrowser === true);
 
   return (
     <section className="card">
@@ -122,7 +124,7 @@ export function CallBuilder({ data, busy, version, onSend }: {
       <div className="chips">
         <span className="muted small">Examples:</span>
         {example.map((e) => (
-          <button key={e.label} type="button" className="chip" disabled={!simulator} onClick={() => applyExample(e)}>
+          <button key={e.label} type="button" className="chip" disabled={!e.contract} onClick={() => applyExample(e)}>
             {e.label}
           </button>
         ))}
@@ -132,7 +134,7 @@ export function CallBuilder({ data, busy, version, onSend }: {
         <span className="field-label">Signer</span>
         <select value={signerId} onChange={(e) => setSignerId(e.target.value)} disabled={!data}>
           {data?.signers.map((s) => (
-            <option key={s.id} value={s.id} disabled={!s.hasKey && via !== "browser"}>{signerOptionLabel(s, data.latestLedger)}</option>
+            <option key={s.id} value={s.id} disabled={!s.hasKey && !s.viaBrowser && via !== "browser"}>{signerOptionLabel(s, data.latestLedger)}</option>
           ))}
         </select>
       </label>
@@ -168,7 +170,8 @@ export function CallBuilder({ data, busy, version, onSend }: {
         <button disabled={!canSend} onClick={() => request && onSend(request, via === "browser" ? "browser" : undefined)}>
           {busy ? "Working…" : rejected ? "Send anyway (expect a rejection)" : "Send"}
         </button>
-        {signer && !signer.hasKey && via !== "browser" && <span className="muted small">This demo holds no key for that signer.</span>}
+        {signer && !signer.hasKey && !signer.viaBrowser && via !== "browser" && <span className="muted small">This demo holds no key for that signer.</span>}
+        {signer?.viaBrowser && <span className="muted small">Signed in your wallet.</span>}
       </div>
     </section>
   );

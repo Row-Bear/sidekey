@@ -152,3 +152,10 @@ textarea { font: inherit; font-size: 13px; color: var(--text); background: #0d11
 .modal-foot { justify-content: flex-end; margin-top: 16px; }
 .sign-with { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12.5px; }
 .sign-with select { width: auto; }
+
+/* ---- Wallet panel ---- */
+.wallet-panel { margin-bottom: 16px; }
+.wallet-panel .section-head { margin-bottom: 8px; }
+.mode-switch { display: flex; gap: 6px; }
+.wallet-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; font-size: 14px; }
+.tag.ok { color: var(--ok); border-color: rgba(63, 185, 80, 0.5); }

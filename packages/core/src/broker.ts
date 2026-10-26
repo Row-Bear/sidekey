@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
+import { Keypair, StrKey, Transaction, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
 import { type Authorizer, flattenInvocation } from "./chain.js";
 import { type CallContext, describeCall, ed25519SignatureScVal, messageSignatureScVal } from "./policy.js";
 import { decodeWalletSignature, sep53Digest, walletMessage } from "./wallet.js";
@@ -15,18 +15,24 @@ export type SignatureResponse =
   /** ed25519 signature over the 32-byte payload: what a wallet's `signAuthEntry` returns. */
   | { kind: "payload"; signature: string }
   /** ed25519 signature over the SEP-53 digest of `message`: what a wallet's `signMessage` returns. */
-  | { kind: "message"; signature: string };
+  | { kind: "message"; signature: string }
+  /** The same transaction, signed: what a wallet's `signTransaction` returns. */
+  | { kind: "transaction"; signedXdr: string };
 
-/** A request as the browser sees it. */
-export interface PendingSignature {
+interface PendingBase {
   id: string;
   createdAt: string;
   expiresAt: string;
-  /** The smart account being authorized. */
-  account: string;
   signer: { label: string; /** hex of the raw ed25519 key */ id: string; address: string };
   /** What is being authorized, one line per invocation (root and nested). */
   summary: string[];
+}
+
+/** The smart account's authorization of a call, to be signed as a payload or a SEP-53 message. */
+export interface PendingAuthEntry extends PendingBase {
+  kind: "auth-entry";
+  /** The smart account being authorized. */
+  account: string;
   /** The 32-byte hash to sign, hex. */
   payloadHex: string;
   /** The SEP-53 text to hand to `signMessage` for the `message` kind. */
@@ -34,6 +40,18 @@ export interface PendingSignature {
   /** The auth-entry preimage (base64 XDR) to hand to `signAuthEntry` for the `payload` kind. */
   preimageXdr: string;
 }
+
+/** A whole transaction the signer's G account is the source of, to be signed by a wallet. */
+export interface PendingTransaction extends PendingBase {
+  kind: "transaction";
+  transactionXdr: string;
+  networkPassphrase: string;
+  /** The transaction hash, hex. */
+  transactionHashHex: string;
+}
+
+/** A request as the browser sees it. */
+export type PendingSignature = PendingAuthEntry | PendingTransaction;
 
 export type SubmitResult = { ok: true } | { ok: false; reason: "unknown" | "invalid"; message: string };
 
@@ -55,11 +73,21 @@ export interface BrokerRequest {
   timeoutMs?: number;
 }
 
+export interface TransactionRequest {
+  signerRaw: Uint8Array;
+  signerLabel: string;
+  /** The unsigned transaction envelope (base64 XDR); its source must be the signer's account. */
+  transactionXdr: string;
+  networkPassphrase: string;
+  summary: string[];
+  timeoutMs?: number;
+}
+
 interface Waiting {
   view: PendingSignature;
-  signerRaw: Uint8Array;
-  payload: Uint8Array;
-  resolve: (value: xdr.ScVal) => void;
+  /** Checks the browser's answer and returns what the job gets; throws a readable error if it is no good. */
+  accept: (response: SignatureResponse) => unknown;
+  resolve: (value: never) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -71,32 +99,99 @@ export class SignatureBroker {
 
   constructor(private readonly defaultTimeoutMs = DEFAULT_SIGNING_TIMEOUT_MS) {}
 
-  /** Waits for the browser to sign. Rejects on cancel or timeout; resolves at most once. */
+  /** Waits for the browser to sign an auth entry. Rejects on cancel or timeout; resolves at most once. */
   request(req: BrokerRequest): Promise<xdr.ScVal> {
+    const key = Keypair.fromPublicKey(StrKey.encodeEd25519PublicKey(Buffer.from(req.signerRaw)));
+    const message = walletMessage(req.account, req.payload);
+    return this.enqueue<xdr.ScVal>(
+      req,
+      (base) => ({
+        ...base,
+        kind: "auth-entry",
+        account: req.account,
+        payloadHex: Buffer.from(req.payload).toString("hex"),
+        message,
+        preimageXdr: req.preimageXdr,
+      }),
+      (response) => {
+        const signature = signatureOf(response);
+        switch (response.kind) {
+          case "payload":
+            if (!key.verify(Buffer.from(req.payload), signature)) {
+              throw new Error(`That is not ${req.signerLabel}'s signature over the payload`);
+            }
+            return ed25519SignatureScVal(req.signerRaw, signature);
+          case "message":
+            if (!key.verify(sep53Digest(message), signature)) {
+              throw new Error(`That is not ${req.signerLabel}'s signature over the SEP-53 message`);
+            }
+            return messageSignatureScVal(req.signerRaw, signature);
+          default:
+            throw new Error('Expected a "payload" or "message" signature for this request');
+        }
+      },
+    );
+  }
+
+  /**
+   * Waits for a wallet to sign a transaction. The job gets the transaction rebuilt from its own copy plus
+   * the one verified signature, so anything else in the wallet's answer (extra signatures, edits) is dropped.
+   */
+  requestTransaction(req: TransactionRequest): Promise<string> {
+    const address = StrKey.encodeEd25519PublicKey(Buffer.from(req.signerRaw));
+    const key = Keypair.fromPublicKey(address);
+    const original = parseTransaction(req.transactionXdr, req.networkPassphrase);
+    const hash = Buffer.from(original.hash());
+    return this.enqueue<string>(
+      req,
+      (base) => ({
+        ...base,
+        kind: "transaction",
+        transactionXdr: req.transactionXdr,
+        networkPassphrase: req.networkPassphrase,
+        transactionHashHex: hash.toString("hex"),
+      }),
+      (response) => {
+        if (response.kind !== "transaction") throw new Error('Expected a signed "transaction" for this request');
+        const signed = parseTransaction(response.signedXdr, req.networkPassphrase);
+        if (!Buffer.from(signed.hash()).equals(hash)) {
+          throw new Error("The wallet changed the transaction (its hash differs), so the signature is not accepted");
+        }
+        const hint = Buffer.from(key.signatureHint());
+        const mine = signed.signatures.find((s) => Buffer.from(s.hint.value).equals(hint) && key.verify(hash, Buffer.from(s.signature.value)));
+        if (!mine) throw new Error(`The transaction is not signed by ${req.signerLabel} (${address})`);
+        const result = parseTransaction(req.transactionXdr, req.networkPassphrase);
+        result.addSignature(address, Buffer.from(mine.signature.value).toString("base64"));
+        return result.toXDR();
+      },
+    );
+  }
+
+  private enqueue<T>(
+    req: { signerRaw: Uint8Array; signerLabel: string; summary: string[]; timeoutMs?: number },
+    view: (base: PendingBase) => PendingSignature,
+    accept: (response: SignatureResponse) => unknown,
+  ): Promise<T> {
     const id = randomUUID();
     const timeoutMs = req.timeoutMs ?? this.defaultTimeoutMs;
     const now = Date.now();
-    const view: PendingSignature = {
+    const base: PendingBase = {
       id,
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + timeoutMs).toISOString(),
-      account: req.account,
       signer: {
         label: req.signerLabel,
         id: Buffer.from(req.signerRaw).toString("hex"),
         address: StrKey.encodeEd25519PublicKey(Buffer.from(req.signerRaw)),
       },
       summary: req.summary,
-      payloadHex: Buffer.from(req.payload).toString("hex"),
-      message: walletMessage(req.account, req.payload),
-      preimageXdr: req.preimageXdr,
     };
-    return new Promise<xdr.ScVal>((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiting.delete(id);
         reject(new SigningCancelled("Timed out waiting for a signature"));
       }, timeoutMs);
-      this.waiting.set(id, { view, signerRaw: req.signerRaw, payload: req.payload, resolve, reject, timer });
+      this.waiting.set(id, { view: view(base), accept, resolve: resolve as (v: never) => void, reject, timer });
     });
   }
 
@@ -112,14 +207,14 @@ export class SignatureBroker {
     const waiting = this.waiting.get(id);
     if (!waiting) return { ok: false, reason: "unknown", message: "No such signing request (it may have expired or already been answered)" };
 
-    let scVal: xdr.ScVal;
+    let value: unknown;
     try {
-      scVal = this.verified(waiting, response);
+      value = waiting.accept(response ?? ({} as SignatureResponse));
     } catch (err) {
       return { ok: false, reason: "invalid", message: err instanceof Error ? err.message : String(err) };
     }
     this.settle(id);
-    waiting.resolve(scVal);
+    waiting.resolve(value as never);
     return { ok: true };
   }
 
@@ -137,25 +232,18 @@ export class SignatureBroker {
     if (waiting) clearTimeout(waiting.timer);
     this.waiting.delete(id);
   }
+}
 
-  private verified(waiting: Waiting, response: SignatureResponse): xdr.ScVal {
-    const key = Keypair.fromPublicKey(StrKey.encodeEd25519PublicKey(Buffer.from(waiting.signerRaw)));
-    const signature = decodeWalletSignature(String((response as { signature?: unknown }).signature ?? ""));
-    switch (response?.kind) {
-      case "payload":
-        if (!key.verify(Buffer.from(waiting.payload), signature)) {
-          throw new Error(`That is not ${waiting.view.signer.label}'s signature over the payload`);
-        }
-        return ed25519SignatureScVal(waiting.signerRaw, signature);
-      case "message":
-        if (!key.verify(sep53Digest(waiting.view.message), signature)) {
-          throw new Error(`That is not ${waiting.view.signer.label}'s signature over the SEP-53 message`);
-        }
-        return messageSignatureScVal(waiting.signerRaw, signature);
-      default:
-        throw new Error('Unknown signature kind; expected "payload" or "message"');
-    }
-  }
+function signatureOf(response: SignatureResponse): Buffer {
+  const raw = (response as { signature?: unknown }).signature;
+  if (response?.kind === "transaction") throw new Error('Expected a "payload" or "message" signature for this request');
+  return decodeWalletSignature(String(raw ?? ""));
+}
+
+function parseTransaction(xdrText: string, networkPassphrase: string): Transaction {
+  const tx = TransactionBuilder.fromXDR(xdrText, networkPassphrase);
+  if (!("operations" in tx) || "innerTransaction" in tx) throw new Error("Fee-bump transactions are not supported");
+  return tx as Transaction;
 }
 
 /** The invocations an auth-entry preimage authorizes, as readable lines. */

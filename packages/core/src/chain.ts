@@ -7,11 +7,12 @@ import {
   Operation,
   rpc,
   scValToNative,
+  Transaction,
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
 import { NETWORK_PASSPHRASE } from "./config.js";
-import { ed25519SignatureScVal, type CallContext } from "./policy.js";
+import { type CallContext, describeCall, ed25519SignatureScVal } from "./policy.js";
 
 /** Who must authorize a Soroban call: a classic G account or the smart account. */
 export type Authorizer =
@@ -218,7 +219,11 @@ export async function invoke(ctx: ChainContext, params: InvokeParams): Promise<I
 
   const prepared = rpc.assembleTransaction(withAuth, enforcing).build();
   prepared.sign(sponsor);
-  const sent = await server.sendTransaction(prepared);
+  return submitAndWait(server, prepared);
+}
+
+async function submitAndWait(server: rpc.Server, tx: Transaction): Promise<InvokeResult> {
+  const sent = await server.sendTransaction(tx);
   if (sent.status === "ERROR") {
     return { ok: false, stage: "submission", error: `sendTransaction rejected: ${sent.errorResult?.toXDR("base64") ?? "unknown"}` };
   }
@@ -231,6 +236,46 @@ export async function invoke(ctx: ChainContext, params: InvokeParams): Promise<I
     hash: sent.hash,
     returnValue: final.returnValue === undefined ? undefined : scValToNative(final.returnValue),
   };
+}
+
+export interface SourceInvokeParams {
+  contractId: string;
+  method: string;
+  args: xdr.ScVal[];
+  /** The G account that is the transaction source, pays its fee, and authorizes the call as itself. */
+  sourceAddress: string;
+  /** Gets the transaction signed by that account (a wallet); resolves to the signed envelope XDR. */
+  signTransaction: (unsignedXdr: string, summary: string[]) => Promise<string>;
+}
+
+/**
+ * Invokes a contract call whose transaction source is a G account, for calls that account authorizes
+ * as itself (such as a token transfer from it). Its signature on the transaction is the authorization,
+ * so nothing else needs signing, and it is the account, not the fee sponsor, that pays the fee.
+ */
+export async function invokeAsSource(ctx: ChainContext, params: SourceInvokeParams): Promise<InvokeResult> {
+  const { server } = ctx;
+  const hostFunction = contractCallFunction(params);
+  const tx = buildTransaction(await server.getAccount(params.sourceAddress), hostFunction, []);
+
+  const simulation = await server.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(simulation)) {
+    return { ok: false, stage: "simulation", error: errorText(simulation.error), detail: simulation.error };
+  }
+  // Only source-account authorization is covered by the transaction signature.
+  const foreign = (simulation.result?.auth ?? []).find((entry) => credentialAddress(entry) !== null);
+  if (foreign) {
+    return {
+      ok: false,
+      stage: "simulation",
+      error: `This call needs an authorization from ${credentialAddress(foreign)}, which the transaction signature does not cover`,
+    };
+  }
+
+  const prepared = rpc.assembleTransaction(tx, simulation).build();
+  const summary: CallContext[] = [{ kind: "contract", contract: params.contractId, function: params.method, args: params.args }];
+  const signedXdr = await params.signTransaction(prepared.toXDR(), summary.map(describeCall));
+  return submitAndWait(server, TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE) as Transaction);
 }
 
 /** Read-only call evaluated by simulation; nothing is submitted. */

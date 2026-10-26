@@ -209,27 +209,46 @@ client accepts both common encodings).
   The modal prints call arguments as plain values, so a signer enum shows as
   `["Ed25519","0x…"]`.
 
-### WP4: Wallet connection, xBull (goal 4; about 2.5 h)
+### WP4: Wallet connection, xBull (goal 4; about 2.5 h) — done, real xBull still to check by hand
 
-- [ ] Add `@creit.tech/stellar-wallets-kit` (npm 2.7.1; also on JSR). Initialize with the xBull
-      module on testnet; use the kit's connect button or a custom one.
-- [ ] Show the connected G address and network; block if the wallet is not on testnet.
-- [ ] If the connected account does not exist on testnet, a "Fund with Friendbot" button.
-- [ ] **Wallet mode**: "Create smart account for my wallet" deploys a smart account whose
-      master is the connected address. No master secret is stored; the master authorizer is
-      the remote signer from WP3. The session state records `masterMode: wallet`.
-- [ ] Master steps (1, 3, 4, 7 and policy edits) prompt the wallet with `signMessage` through
-      `walletMessageSigner` (xBull) or `signAuthEntry` where supported (Freighter). Step 2 is the
-      G account's own classic authorization: the wallet signs the transaction with
-      `signTransaction` (wallet as source).
-- [ ] Manual check with the real xBull extension on testnet: message text shown, signature
-      encoding, and that the local signature check passes.
-- [ ] Show the exact message in the signing modal; the wallet will display
-      `Authorize <account> payload <hash>`, which a user cannot tell apart per call, so the
-      dashboard must show the call summary before the wallet prompt.
-- [ ] Keep **demo mode** (server-held master) as a toggle for headless and fallback runs.
-- Done when: with xBull connected, the master steps are signed in the wallet and the demo
-  completes on a new smart account owned by the wallet's G address.
+- [x] **Wallets Kit** (`@creit.tech/stellar-wallets-kit` 2.7.1) in `web/`, with only the xBull and
+      Freighter modules bundled (plus dev test wallets). The kit's own connect modal is used.
+      Production build: 435 KB (137 KB gzipped); the test wallet is excluded from it.
+- [x] **Wallet panel**: connect and disconnect, address, network chip (testnet / not testnet /
+      unknown, since xBull cannot report its network), XLM balance, "Fund with Friendbot" for an
+      account not on testnet yet, "Use this wallet as master", and a Demo keys / My wallet switch.
+- [x] **Wallet mode** (`wallet-session.json`, gitignored; `.env` untouched): the smart account's
+      master is the wallet's G address; no secret is stored anywhere. "Run full demo" in wallet mode
+      deploys a fresh smart account for the same wallet (sponsor pays, no prompt), then runs the steps.
+      Demo mode is unchanged and is one click away.
+- [x] **Signing**: the master's auth entries use `signAuthEntry` where the wallet supports it
+      (Freighter) and `signMessage` otherwise (xBull), falling back from one to the other. Step 2 is
+      the master's own transfer: the **wallet signs the whole transaction** (`signTransaction`), is the
+      transaction source and pays its fee (`invokeAsSource`). The broker has a new `transaction`
+      kind: the server accepts the answer only if it is the same transaction (same hash) with a valid
+      signature by the master key, and rebuilds it with only that signature.
+- [x] Funds can be moved back to the wallet with the call builder's "send 1 XLM to the master"
+      example, so the same wallet can run the demo again. A balance check before step 2 gives a
+      clear message instead of asking the wallet to sign something that cannot succeed.
+- [x] **Dev test wallets** (`web/src/testWallet.ts`, dev server only): "like xBull" (messages only,
+      with xBull's base64 reading of messages) and "like Freighter" (auth entries). They go through
+      the same kit code path and ask `confirm()` showing what a real wallet would show.
+- [x] Tests: broker transaction kind (7 tests, mutation-checked, including a forged signature that
+      copies the master's 4-byte hint), plus end to end on testnet:
+      `npm run e2e:wallet` (HTTP, plays a wallet: 5 prompts, all 7 steps, funds returned, a second
+      full run with the same wallet) and `spikes/broker/transaction.ts`. In the dashboard with the
+      test wallet: connect through the kit, fund, create the account, full demo (4 message prompts
+      and 1 transaction prompt, all steps as expected), and the Freighter-like path for a policy edit.
+- [ ] **Manual check with the real xBull extension** (cannot be automated here): connect; make sure
+      the message shown is `Authorize C… payload <hash>`; confirm it signs, and that the dashboard
+      accepts the signature (the server accepts base64 or hex); confirm step 2's transaction prompt.
+      Repeat with Freighter if installed (it should use `signAuthEntry`).
+- Done when: with a wallet connected, the master steps are signed in the wallet and the demo
+  completes on a new smart account owned by the wallet's G address. Met with the test wallets.
+- Limits: the delegate's key is still held by the demo (passkey in WP5). The wallet's own steps
+  show as `Authorize <account> payload <hash>`, so the dashboard's summary is the readable
+  description. `npm audit` reports advisories from wallet integrations the kit depends on
+  (WalletConnect, Ledger, Trezor) that are not bundled here.
 
 ### WP5: Passkey delegate (goal 5; about 3 h)
 

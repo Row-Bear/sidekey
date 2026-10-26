@@ -93,7 +93,7 @@ lists every variable.
 | `npm run export:run` | Writes `docs/recorded-run.md` from `demo-run.json` |
 | `npm run typecheck` | Typechecks the Node code and the web app |
 | `npm run test:contract` / `npm run test:core` / `npm run test:web` | Contract, core and API-guard tests |
-| `npm run e2e:broker` | End-to-end signature broker check over HTTP (needs `npm run web` running and a funded account) |
+| `npm run e2e:broker` / `npm run e2e:wallet` | End-to-end signing checks over HTTP on testnet (need `npm run web` running); the wallet one plays a wallet through the whole demo |
 
 `--fresh` and **Run full demo** replace `MASTER_*` and `SMART_ACCOUNT_ID` in
 `.env`; the previous master secret is not kept, so funds left on an older smart
@@ -121,6 +121,29 @@ account become unreachable. A full run takes about a minute.
 7. **If testnet misbehaves**, show [docs/recorded-run.md](docs/recorded-run.md);
    the dashboard also keeps showing the last results from `demo-run.json`.
 
+## Wallet mode (connect your own wallet as the master)
+
+By default the master is a key this demo holds, so everything runs without prompts. To be the master
+yourself, use the **Master signer** panel in the dashboard:
+
+1. **Connect wallet** (xBull or Freighter; in the dev server also two test wallets that need no extension).
+2. If the account is not on testnet yet, **Fund with Friendbot**.
+3. **Use this wallet as master**: deploys a smart account whose master is your wallet's address. Nothing
+   secret is stored; the choice is kept in `wallet-session.json` (gitignored).
+4. **Run full demo**: every master action asks your wallet. Auth entries are signed with `signAuthEntry`
+   (Freighter) or `signMessage` (xBull); step 2, the master's own XLM transfer, is a whole transaction that
+   the wallet signs and pays for. That is 5 prompts. Delegate steps still use the demo's delegate key.
+
+To run it again with the same wallet, send the XLM back first: in the call builder pick the master as signer
+and use the example "send 1 XLM to the master" (set the amount to 95000000000 stroops, which is 9,500 XLM).
+Switch back with **Demo keys** at any time.
+
+The wallet shows `Authorize <smart account> payload <hash>` for auth entries, which does not say which call is
+approved; the signing dialog in the dashboard lists the exact calls first.
+
+**Not yet tried with the real xBull extension** (tested with test wallets that copy its behaviour). See the manual
+check in [STRETCH_PLAN.md](STRETCH_PLAN.md) under WP4.
+
 ## Repository layout
 
 ```
@@ -137,7 +160,8 @@ PLAN.md                    development plan and status
 
 This is a hackathon PoC, not audited, and testnet only.
 
-- One master key with no rotation or recovery; ed25519 signatures only.
+- One master key with no rotation or recovery; ed25519 signatures only. A wallet master is signed through the
+  wallet; the delegate key is still held by the demo.
 - Policy is an allowlist with per-signer expiry and per-argument constraints; there are
   no spend limits or rate limits.
 - The contract extends its own storage lifetime to about 30 days on deploy and on

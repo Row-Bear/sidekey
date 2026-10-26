@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { Address, buildAuthorizationEntryPreimage, Keypair, Networks, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
+import {
+  Account,
+  Address,
+  buildAuthorizationEntryPreimage,
+  Keypair,
+  Networks,
+  nativeToScVal,
+  Operation,
+  scValToNative,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
 import {
   brokerSigner,
   SignatureBroker,
@@ -197,5 +208,131 @@ describe("summarizePreimage and brokerSigner", () => {
     assert.deepEqual(pending.summary, [`withdraw(${ACCOUNT}, 5) on ${SIM}`]);
     broker.submit(pending.id, { kind: "payload", signature: b64(master.sign(PAYLOAD)) });
     assert.equal(kindOf(await job), "Ed25519");
+  });
+});
+
+describe("transaction requests (a wallet signs a whole transaction)", () => {
+  const build = (fee = "100", source = master) =>
+    new TransactionBuilder(new Account(source.publicKey(), "7"), { fee, networkPassphrase: Networks.TESTNET })
+      .addOperation(Operation.bumpSequence({ bumpTo: "100" }))
+      .setTimeout(300)
+      .build();
+
+  const ask = (broker: SignatureBroker, tx = build()) =>
+    broker.requestTransaction({
+      signerRaw: master.rawPublicKey(),
+      signerLabel: "master",
+      transactionXdr: tx.toXDR(),
+      networkPassphrase: Networks.TESTNET,
+      summary: ["transfer(...)"],
+    });
+
+  const signedBy = (key: Keypair, tx = build()) => {
+    tx.sign(key);
+    return tx.toXDR();
+  };
+
+  it("pauses, shows the transaction and its hash, and resumes with the signed transaction", async () => {
+    const broker = new SignatureBroker();
+    const tx = build();
+    const job = ask(broker, tx);
+    const [pending] = broker.pending();
+    assert.equal(pending.kind, "transaction");
+    assert.equal(pending.kind === "transaction" && pending.transactionHashHex, Buffer.from(tx.hash()).toString("hex"));
+    assert.equal(pending.signer.address, master.publicKey());
+
+    const answered = broker.submit(pending.id, { kind: "transaction", signedXdr: signedBy(master, build()) });
+    assert.deepEqual(answered, { ok: true });
+    const signed = TransactionBuilder.fromXDR(await job, Networks.TESTNET);
+    assert.equal(signed.signatures.length, 1);
+    assert.ok(master.verify(Buffer.from(signed.hash()), Buffer.from(signed.signatures[0].signature.value)));
+  });
+
+  it("refuses a transaction signed by another key, an unsigned one and garbage, and keeps waiting", async () => {
+    const broker = new SignatureBroker();
+    void ask(broker).catch(() => {});
+    const [{ id }] = broker.pending();
+    const refused = (signedXdr: string, pattern: RegExp) => {
+      const result = broker.submit(id, { kind: "transaction", signedXdr });
+      assert.equal(result.ok, false);
+      assert.match(result.ok === false ? result.message : "", pattern);
+    };
+    refused(signedBy(stranger), /not signed by master/);
+    refused(build().toXDR(), /not signed by master/);
+    refused("not xdr", /./);
+    assert.equal(broker.pending().length, 1);
+    broker.cancel(id);
+  });
+
+  it("refuses a forged signature that carries the master's hint but was made by another key", async () => {
+    const broker = new SignatureBroker();
+    void ask(broker).catch(() => {});
+    const [{ id }] = broker.pending();
+    const forged = build();
+    // The hint is the last 4 bytes of the public key, so it can be copied; the signature itself cannot.
+    // (The SDK's addSignature verifies, so the decorated signature is built by hand.)
+    forged.signatures.push(
+      new xdr.DecoratedSignature({ hint: master.signatureHint(), signature: stranger.sign(Buffer.from(forged.hash())) }),
+    );
+    assert.equal(forged.signatures.length, 1);
+    assert.equal(
+      TransactionBuilder.fromXDR(forged.toXDR(), Networks.TESTNET).signatures.length,
+      1,
+      "the forged signature must survive the XDR round trip, or this test proves nothing",
+    );
+    const result = broker.submit(id, { kind: "transaction", signedXdr: forged.toXDR() });
+    assert.equal(result.ok, false);
+    assert.match(result.ok === false ? result.message : "", /not signed by master/);
+    broker.cancel(id);
+  });
+
+  it("refuses a changed transaction even if the master signed it", async () => {
+    const broker = new SignatureBroker();
+    void ask(broker).catch(() => {});
+    const [{ id }] = broker.pending();
+    const result = broker.submit(id, { kind: "transaction", signedXdr: signedBy(master, build("9999")) });
+    assert.equal(result.ok, false);
+    assert.match(result.ok === false ? result.message : "", /changed the transaction/);
+    // A transaction for a different source is a different transaction too.
+    assert.equal(broker.submit(id, { kind: "transaction", signedXdr: signedBy(master, build("100", stranger)) }).ok, false);
+    broker.cancel(id);
+  });
+
+  it("drops anything extra the wallet attached; only the verified signature is kept", async () => {
+    const broker = new SignatureBroker();
+    const job = ask(broker);
+    const [{ id }] = broker.pending();
+    const both = build();
+    both.sign(stranger);
+    both.sign(master);
+    assert.equal(broker.submit(id, { kind: "transaction", signedXdr: both.toXDR() }).ok, true);
+    const result = TransactionBuilder.fromXDR(await job, Networks.TESTNET);
+    assert.equal(result.signatures.length, 1);
+  });
+
+  it("does not mix request kinds", async () => {
+    const broker = new SignatureBroker();
+    void ask(broker).catch(() => {});
+    void request(broker).catch(() => {});
+    const [tx, auth] = broker.pending();
+    assert.equal(broker.submit(tx.id, { kind: "payload", signature: b64(master.sign(PAYLOAD)) }).ok, false);
+    assert.equal(broker.submit(auth.id, { kind: "transaction", signedXdr: signedBy(master) }).ok, false);
+    assert.equal(broker.pending().length, 2);
+    broker.cancel(tx.id);
+    broker.cancel(auth.id);
+  });
+
+  it("is single use and cancellable", async () => {
+    const broker = new SignatureBroker();
+    const job = ask(broker);
+    const [{ id }] = broker.pending();
+    assert.equal(broker.submit(id, { kind: "transaction", signedXdr: signedBy(master) }).ok, true);
+    await job;
+    assert.equal(broker.submit(id, { kind: "transaction", signedXdr: signedBy(master) }).ok, false);
+
+    const second = ask(broker);
+    const [next] = broker.pending();
+    broker.cancel(next.id, "No");
+    await assert.rejects(second, SigningCancelled);
   });
 });

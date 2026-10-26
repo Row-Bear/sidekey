@@ -10,4 +10,5 @@ export * from "./deploy.js";
 export * from "./results.js";
 export * from "./history.js";
 export * from "./calls.js";
+export * from "./session.js";
 export * from "./fresh.js";

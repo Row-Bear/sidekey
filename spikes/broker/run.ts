@@ -7,7 +7,7 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
 import { Keypair } from "@stellar/stellar-sdk";
-import { type CallRecord, type PendingSignature, sep53Digest } from "@poc/core";
+import { type CallRecord, type PendingAuthEntry, sep53Digest } from "@poc/core";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:5173";
 const master = Keypair.fromSecret(process.env.MASTER_SECRET!);
@@ -17,7 +17,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface State {
   run: { busy: boolean; lastError: string | null };
-  pendingSignatures: PendingSignature[];
+  pendingSignatures: PendingAuthEntry[];
   calls: CallRecord[];
   results: Record<string, { outcome: string; asExpected: boolean; txHash?: string }>;
 }

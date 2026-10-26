@@ -16,6 +16,7 @@
     "test:web": "tsx --test web/server/guard.test.ts",
     "test:core": "tsx --test packages/core/test/*.test.ts",
     "e2e:broker": "tsx spikes/broker/run.ts",
+    "e2e:wallet": "tsx spikes/broker/wallet-mode.ts",
     "deploy:account": "tsx scripts/02-deploy-smart-account.ts",
     "poc": "tsx scripts/03-run-poc.ts",
     "export:run": "tsx scripts/04-export-run.ts"
