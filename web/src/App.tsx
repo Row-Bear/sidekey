@@ -14,7 +14,7 @@ import {
   stepStatus,
   type StepStatus,
 } from "./api";
-import { CallBuilder } from "./CallBuilder";
+import { CallBuilder, type CallPrefill } from "./CallBuilder";
 import { CallHistory } from "./CallHistory";
 import { useAddressBook } from "./addressBook";
 import { ContractPicker } from "./ContractPicker";
@@ -26,8 +26,6 @@ import { PasskeyPanel } from "./PasskeyPanel";
 import { passkeySigner } from "./passkey";
 import { PolicyEditor } from "./PolicyEditor";
 import { PolicyTable } from "./PolicyTable";
-import { SavedCallCards } from "./SavedCallCards";
-import { useSavedCalls } from "./savedCalls";
 import { SigningModal } from "./SigningModal";
 import { Spinner } from "./Spinner";
 import { useWallet } from "./wallet";
@@ -252,6 +250,8 @@ export default function App({ variant }: { variant: Variant }) {
 
   // The outcome of each finished call or policy edit appears as a toast, so it is seen where the action was taken.
   const [toast, setToast] = useState<CallRecord | null>(null);
+  // A rule's "Fill in" button hands its call to the builder; `n` makes repeating the same one count as new.
+  const [prefill, setPrefill] = useState<CallPrefill | null>(null);
   const lastCallId = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (!state) return;
@@ -282,7 +282,6 @@ export default function App({ variant }: { variant: Variant }) {
   }, [busy]);
   const { data: signersData, error: signersError } = useSigners(signersVersion, demo);
   const book = useAddressBook(signersData);
-  const savedCalls = useSavedCalls(signersData?.smartAccount ?? "");
   // One contract for both the policy editor and the call builder; the simulator is the starting choice.
   const [contract, setContract] = useState("");
   const defaultedContract = useRef(false);
@@ -437,16 +436,6 @@ export default function App({ variant }: { variant: Variant }) {
           )}
           {(demo || ready) && (
             <>
-          {!demo && signersData && (
-            <SavedCallCards
-              saved={savedCalls}
-              signers={signersData.signers}
-              nameOf={book.nameOf}
-              busy={busy}
-              walletReady={walletOwns}
-              onRun={(call) => void start({ action: "call", call, via: "browser" })}
-            />
-          )}
           <div className="grid">
             {demo && <Accounts state={state} />}
             {/* On the plain page the policy sits on the left, directly above the policy editor. */}
@@ -462,6 +451,12 @@ export default function App({ variant }: { variant: Variant }) {
                 busy={busy}
                 nameOf={book.nameOf}
                 onApply={(op) => void start({ action: "policy", policy: op, via: "browser" })}
+                onRun={(call) => void start({ action: "call", call, via: "browser" })}
+                onFillIn={(call) => {
+                  setContract(call.contract);
+                  setPrefill({ ...call, n: (prefill?.n ?? 0) + 1 });
+                  document.getElementById("call-builder")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
               />
             )}
           </div>
@@ -483,7 +478,7 @@ export default function App({ variant }: { variant: Variant }) {
                 </p>
               </section>
             )}
-            <CallBuilder demo={demo} walletReady={walletOwns} data={signersData} busy={busy} version={signersVersion} contract={contract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onSend={(call, via) => void start({ action: "call", call, via })} onSave={demo ? undefined : savedCalls.save} />
+            <CallBuilder demo={demo} walletReady={walletOwns} data={signersData} busy={busy} version={signersVersion} contract={contract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onSend={(call, via) => void start({ action: "call", call, via })} prefill={prefill} />
           </div>
             </>
           )}

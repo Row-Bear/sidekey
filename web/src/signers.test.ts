@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SignerView } from "@poc/core";
-import { delegatesFirst, signerStatus } from "./signers.ts";
+import { callFromRule, delegatesFirst, signerStatus } from "./signers.ts";
 
 const make = (id: string, patch: Partial<SignerView> = {}): SignerView => ({
   id,
@@ -60,4 +60,18 @@ describe("delegatesFirst", () => {
     delegatesFirst(input, latest);
     assert.deepEqual(input.map((s) => s.id), ["expired", "delegate"]);
   });
+});
+
+describe("callFromRule", () => {
+  it("a rule with every argument fixed can be run as it is", () => {
+  const call = callFromRule({ function: "withdraw", args: [{ kind: "self" }, { kind: "exact", display: "10000000" }] }, "CACC");
+  assert.deepEqual(call, { function: "withdraw", args: ["CACC", "10000000"], complete: true });
+});
+
+  it("open or structured arguments make a rule incomplete", () => {
+  assert.equal(callFromRule({ function: "f", args: [{ kind: "self" }, { kind: "any" }] }, "C").complete, false);
+  assert.equal(callFromRule({ function: "f", args: [{ kind: "lessThan" }] }, "C").complete, false);
+  assert.equal(callFromRule({ function: "f", args: [{ kind: "exact", display: '["a"]' }] }, "C").complete, false);
+  assert.deepEqual(callFromRule({ function: "f", args: [] }, "C"), { function: "f", args: [], complete: true });
+});
 });

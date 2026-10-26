@@ -10,7 +10,6 @@ import { defaultFunction, describeSignature } from "./functions";
 import { Info } from "./Info";
 import { delegatesFirst } from "./signers";
 import { examplesFor } from "./examples";
-import { autoCallName } from "./savedCalls";
 
 function signerOptionLabel(signer: SignerView, latestLedger: number, demo: boolean): string {
   if (signer.label === "master") return `master ${shortAddress(signer.address)}: may authorize anything`;
@@ -58,7 +57,12 @@ function PreviewBox({ preview }: { preview: PreviewResult | "loading" | "sent" |
   );
 }
 
-export function CallBuilder({ demo = true, walletReady = true, data, busy, version, contract, functions, loading, nameOf, onSend, onSave }: {
+export interface CallPrefill extends CallRequest {
+  /** Changes with every request, so asking for the same call twice still applies. */
+  n: number;
+}
+
+export function CallBuilder({ demo = true, walletReady = true, data, busy, version, contract, functions, loading, nameOf, onSend, prefill }: {
   /** The guided demo can sign with the keys it holds; the plain page always signs in the browser (wallet, passkey or pasted). */
   demo?: boolean;
   /** Whether the master can sign now (the wallet that owns the account is connected). The delegate's passkey needs no wallet. */
@@ -73,8 +77,8 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   loading: boolean;
   nameOf: (id: string) => string;
   onSend: (call: CallRequest, via?: SigningVia) => void;
-  /** When given, the builder offers to save the call; it throws a readable message when it cannot be saved. */
-  onSave?: (label: string, call: CallRequest) => void;
+  /** A call to fill in (from a policy rule); applied once the contract's functions have loaded. */
+  prefill?: CallPrefill | null;
 }) {
   const simulator = data?.simulator ?? "";
   const account = data?.smartAccount ?? "";
@@ -84,7 +88,6 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   const [preview, setPreview] = useState<PreviewResult | "loading" | null>(null);
   const [via, setVia] = useState<SigningVia | "demo">(demo ? "demo" : "browser");
   const presetArgs = useRef<string[] | null>(null);
-  const [saveError, setSaveError] = useState("");
   // The call just sent: until it changes, a failing preview is not shown (e.g. nothing left to claim right after claim()).
   const [sentKey, setSentKey] = useState<string | null>(null);
 
@@ -95,6 +98,18 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   useEffect(() => {
     if (!functions.some((f) => f.name === fnName)) setFnName(defaultFunction(functions));
   }, [functions, fnName]);
+
+  const [pending, setPending] = useState<CallPrefill | null>(null);
+  useEffect(() => setPending(prefill ?? null), [prefill]);
+  // The contract is switched by the page; wait until its functions are here, then set the signer, function and arguments.
+  useEffect(() => {
+    if (!pending || contract.trim() !== pending.contract || !functions.some((f) => f.name === pending.function)) return;
+    presetArgs.current = pending.args;
+    setSignerId(pending.signer);
+    setFnName(pending.function);
+    setArgs(pending.args);
+    setPending(null);
+  }, [pending, contract, functions]);
 
   const fn = functions.find((f) => f.name === fnName) ?? null;
   // The fields follow the function's whole signature, so a same-named function with other arguments resets them too.
@@ -113,8 +128,6 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   const orderedSigners = data ? [...data.signers.filter((s) => s.label === "master"), ...delegatesFirst(data.signers, data.latestLedger)] : [];
   const request: CallRequest | null = fn && signerId ? { contract: contract.trim(), function: fn.name, args, signer: signerId } : null;
   const requestKey = useDebounced(JSON.stringify(request), 700);
-
-  useEffect(() => setSaveError(""), [requestKey]);
 
   useEffect(() => {
     if (sentKey !== null && requestKey !== sentKey) setSentKey(null);
@@ -146,7 +159,7 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   const canSend = !busy && request !== null && !masterBlocked && (via === "browser" || signer?.hasKey === true || signer?.viaBrowser === true);
 
   return (
-    <section className="card">
+    <section className="card" id="call-builder">
       <h2>Call builder</h2>
       <p className="muted small">
         Preview a call against the signer's policy, then send it.{" "}
@@ -208,21 +221,7 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
         }}>
           {busy ? "Working…" : rejected ? "Send anyway (expect a rejection)" : "Send"}
         </button>
-        {onSave && (
-          <button type="button" className="ghost" disabled={request === null || busy || (preview !== "loading" && preview?.status === "invalid")} onClick={() => {
-              if (!request) return;
-              try {
-                onSave(autoCallName(request.function, nameOf(request.contract)), request);
-                setSaveError("");
-              } catch (err) {
-                setSaveError(err instanceof Error ? err.message : String(err));
-              }
-            }}>
-            Save call
-          </button>
-        )}
         {demo && signer && !signer.hasKey && !signer.viaBrowser && via !== "browser" && <span className="muted small">This demo holds no key for that signer.</span>}
-        {saveError && <span className="error small">{saveError}</span>}
         {signer?.viaBrowser && <span className="muted small">{signer.kind === "passkey" ? "Signed with your passkey." : "Signed in your wallet."}</span>}
       </div>
     </section>

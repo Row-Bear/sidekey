@@ -30,3 +30,25 @@ export function delegatesFirst(signers: readonly SignerView[], latestLedger: num
     .sort((a, b) => key(a.signer) - key(b.signer) || a.index - b.index)
     .map(({ signer }) => signer);
 }
+
+/** What running a rule as its signer would call: complete when every argument is fixed by the rule. */
+export interface RuleCall {
+  function: string;
+  args: string[];
+  /** False when some argument is left open ("any" or a limit), so the user has to supply it first. */
+  complete: boolean;
+}
+
+const looksStructured = (display: string) => /^[[{]/.test(display) || display.startsWith("0x");
+
+export function callFromRule(rule: { function: string; args: { kind: string; display?: string }[] }, account: string): RuleCall {
+  let complete = true;
+  const args = rule.args.map((a) => {
+    if (a.kind === "self") return account;
+    // Structured values may not read back through the form's input format, so the builder is asked to confirm them.
+    if (a.kind === "exact" && a.display !== undefined && !looksStructured(a.display)) return a.display;
+    complete = false;
+    return a.kind === "exact" && a.display !== undefined ? a.display : "";
+  });
+  return { function: rule.function, args, complete };
+}

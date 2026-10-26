@@ -1,21 +1,25 @@
 import { useState } from "react";
-import type { PolicyOp, RuleView, SignerView } from "@poc/core";
+import type { CallRequest, PolicyOp, RuleView, SignerView } from "@poc/core";
 import { describeRule, expiryText, shortAddress, type SignersResponse } from "./api";
 import { ExpiryField } from "./ExpiryField";
 import { type ExpiryKind, toExpiry } from "./expiry";
-import { delegatesFirst, signerStatus } from "./signers";
+import { callFromRule, delegatesFirst, signerStatus } from "./signers";
 
 /**
  * Every signer on the account with where it stands and what it may do, and the actions that change it: remove a
  * rule, set the expiry, revoke. The one place that shows the account's policy.
  */
-export function PolicyTable({ data, canEdit, busy, nameOf, onApply }: {
+export function PolicyTable({ data, canEdit, busy, nameOf, onApply, onRun, onFillIn }: {
   data: SignersResponse | null;
   /** Whether the owning wallet is connected; without it the table is read-only. */
   canEdit: boolean;
   busy: boolean;
   nameOf: (id: string) => string;
   onApply: (op: PolicyOp) => void;
+  /** Sends the call a rule allows, as that signer. */
+  onRun: (call: CallRequest) => void;
+  /** Hands a rule's call to the call builder when some argument still has to be chosen. */
+  onFillIn: (call: CallRequest) => void;
 }) {
   // One row at a time can be in the middle of setting an expiry or confirming a revoke.
   const [editing, setEditing] = useState<string | null>(null);
@@ -105,6 +109,19 @@ export function PolicyTable({ data, canEdit, busy, nameOf, onApply }: {
                       {policy.rules.map((rule: RuleView) => (
                         <li key={`${rule.contract}.${rule.function}.${rule.args.map((a) => a.kind).join()}`}>
                           <code>{describeRule(rule)}</code> <span className="muted small">on {nameOf(rule.contract)}</span>
+                          {status.kind !== "unregistered" && status.kind !== "expired" && signer.viaBrowser && (() => {
+                            const rc = callFromRule(rule, data.smartAccount);
+                            const request: CallRequest = { contract: rule.contract, function: rc.function, args: rc.args, signer: signer.id };
+                            return rc.complete ? (
+                              <button type="button" className="small-btn rule-run" disabled={busy} title={`Send ${describeRule(rule)} as this signer`} onClick={() => onRun(request)}>
+                                Run
+                              </button>
+                            ) : (
+                              <button type="button" className="ghost small-btn rule-run" title="Some arguments are open: choose them in the call builder" onClick={() => onFillIn(request)}>
+                                Fill in…
+                              </button>
+                            );
+                          })()}
                           {canEdit && (
                             <button
                               type="button"

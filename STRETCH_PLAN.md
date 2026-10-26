@@ -441,9 +441,12 @@ signer already has rules for. The picker opens on the first non-administrative a
 policy editor hides read-only functions behind a "Show read-only" toggle. Fields reset on the
 function's full signature, so a same-named function on another contract gets fresh fields.
 
-## Saved calls (plain page)
+## Run buttons on policy rules (plain page)
 
-The call builder's "Save call" saves the built call as a card at once (named after the function; rename it on the card) (contract, function, arguments, signer) under
-the active smart account, in browser localStorage, up to 6 per account. Cards above the signing
-policy send a saved call in one click (the signing prompt still appears); each card can be renamed
-or removed. Logic and tests: `web/src/savedCalls.ts`.
+Each rule in the signing policy has a button for the signer that holds it (hidden for expired or
+unregistered signers). A rule whose arguments are all fixed ("this account" or an exact simple
+value) shows **Run** and sends the call at once (the signing prompt still appears). A rule with an
+open argument ("any" or a limit) or a structured value shows **Fill in...**, which switches the
+contract picker, fills in the signer, function and known arguments in the call builder, and scrolls
+to it. Logic: `callFromRule` in `web/src/signers.ts`. (Briefly there were saved-call cards; they were
+dropped in favour of this, as a rule already identifies the call.)
