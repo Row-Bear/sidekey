@@ -31,6 +31,7 @@ test_snapshots/
 
 # Local history of custom calls from the dashboard
 demo-calls.json
+demo-run.json
 wallet-session.json
 
 # Editors and operating systems

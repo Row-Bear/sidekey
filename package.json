@@ -22,8 +22,7 @@
     "e2e:lessthan": "tsx spikes/less-than/run.ts",
     "e2e:factory": "tsx spikes/factory/run.ts",
     "deploy:account": "tsx scripts/02-deploy-smart-account.ts",
-    "poc": "tsx scripts/03-run-poc.ts",
-    "export:run": "tsx scripts/04-export-run.ts"
+    "poc": "tsx scripts/03-run-poc.ts"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^17.4.0",

@@ -60,14 +60,10 @@ The core demo is steps 1-7. Steps 8-9 are an optional expiry demo.
 A step that expects a failure only passes if it fails with that specific error, so an
 unrelated failure cannot make it look correct.
 
-A recorded run with transaction links is in [docs/recorded-run.md](docs/recorded-run.md).
-
 ## Prerequisites
 
 - Rust with the `wasm32v1-none` target, and the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) (28+)
 - Node.js 24+
-- Optional: the pinned pyenv environment (`stellar-smart-account-poc-3.14.2`) for
-  any future Python tooling. It is not used by the contract or the demo.
 
 ## Quick start
 
@@ -93,7 +89,6 @@ lists every variable.
 | `npm run poc -- --fresh` | New master and smart account, then steps 1-7 (add `--extended` for the expiry steps 8-9) |
 | `npm run poc -- --only N` / `--from N --to M` | Run selected steps on the current account |
 | `npm run web` | Two pages: `/` the policy and call tester, and `/demo` the guided demo with live balances, timeline and a **Run full demo** button |
-| `npm run export:run` | Writes `docs/recorded-run.md` from `demo-run.json` |
 | `npm run typecheck` | Typechecks the Node code and the web app |
 | `npm run test:contract` / `npm run test:core` / `npm run test:web` | Contract, core and API-guard tests |
 | `npm run e2e:broker` / `e2e:wallet` / `e2e:passkey` | End-to-end signing checks over HTTP on testnet (need `npm run web` running); the wallet one plays a wallet through the whole demo, the passkey one plays an authenticator through the demo and the expiry demo |
@@ -157,8 +152,8 @@ rules, for example "on Blent fixed pool (testnet)".
 6. **Optional: expiry.** Click **Run expiry demo**. The master shortens the
    delegate's expiry to about a minute; once the ledger passes it, the delegate's
    otherwise-allowed `claim()` is refused with `SignerExpired (#5)`. Takes about a minute.
-7. **If testnet misbehaves**, show [docs/recorded-run.md](docs/recorded-run.md);
-   the dashboard also keeps showing the last results from `demo-run.json`.
+7. **If testnet misbehaves**, the dashboard keeps showing the last results from `demo-run.json`
+   (written by each run, not committed).
 
 ## Wallet mode (connect your own wallet as the master)
 
@@ -221,11 +216,11 @@ runner (`npm run poc`) always uses the demo's delegate key.
 ```
 contracts/smart-account/   Soroban smart account + unit tests
 packages/core/             shared TypeScript: chain helpers, scenario, fresh-account setup
-scripts/                   01 setup accounts, 02 deploy, 03 run PoC, 04 export recorded run
-spikes/                    verification spikes (wallet signing, passkey verification, broker e2e)
+contracts/factory/          Soroban factory that deploys smart accounts for G addresses
+scripts/                   01 setup accounts, 02 deploy, 03 run PoC
+spikes/                    testnet end-to-end checks (broker, wallet, passkey, less-than, factory)
 web/                       Vite + React dashboard; web/server/api.ts runs the demo server-side
-docs/recorded-run.md       recorded testnet run
-PLAN.md                    development plan and status
+DESIGN.md                  design notes, findings, security review and verification status
 ```
 
 ## Static version (no server)
@@ -234,7 +229,7 @@ PLAN.md                    development plan and status
 (`.github/workflows/pages.yml`; set `VITE_BASE=/<repo>/` for a sub-path). It needs no server: the wallet
 signs one transaction to create the account through the on-chain factory (`contracts/factory`), and
 OpenZeppelin's Channels service pays every fee. Policy edits and delegate calls work the same way. The
-guided demo (`/demo`) still needs the dev server. Details and findings: `STRETCH_PLAN.md`.
+guided demo (`/demo`) still needs the dev server. Details and findings: `DESIGN.md`.
 
 ## Limitations and security notes
 
