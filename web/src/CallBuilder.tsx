@@ -5,6 +5,8 @@ import { ArgInput } from "./ArgInput";
 import type { SigningVia } from "./api-types";
 import { useDebounced } from "./hooks";
 import { SignWith } from "./SignWith";
+import { FunctionPicker } from "./FunctionPicker";
+import { defaultFunction, describeSignature } from "./functions";
 import { Info } from "./Info";
 import { delegatesFirst } from "./signers";
 import { examplesFor } from "./examples";
@@ -84,16 +86,22 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   }, [data, signerId]);
 
   useEffect(() => {
-    if (!functions.some((f) => f.name === fnName)) setFnName(functions[0]?.name ?? "");
+    if (!functions.some((f) => f.name === fnName)) setFnName(defaultFunction(functions));
   }, [functions, fnName]);
 
   const fn = functions.find((f) => f.name === fnName) ?? null;
+  // The fields follow the function's whole signature, so a same-named function with other arguments resets them too.
+  const fnKey = fn ? describeSignature(fn) : "";
   useEffect(() => {
     setArgs(presetArgs.current ?? (fn?.args ?? []).map(() => ""));
     presetArgs.current = null;
-  }, [fn?.name, contract]);
+  }, [fnKey, contract]);
 
   const signer = data?.signers.find((s) => s.id === signerId) ?? null;
+  // Functions this signer has a rule for here (the master can call anything, so nothing is marked for it).
+  const allowedHere = new Set(
+    signer && signer.label !== "master" ? (signer.policy?.rules.filter((r) => r.contract === contract.trim()).map((r) => r.function) ?? []) : [],
+  );
   // The master, then the delegate and the other signers, most relevant first.
   const orderedSigners = data ? [...data.signers.filter((s) => s.label === "master"), ...delegatesFirst(data.signers, data.latestLedger)] : [];
   const request: CallRequest | null = fn && signerId ? { contract: contract.trim(), function: fn.name, args, signer: signerId } : null;
@@ -160,12 +168,10 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
 
       <div className="muted small contract-line">Contract: <strong>{nameOf(contract.trim())}</strong> (chosen above)</div>
 
-      <label className="field">
+      <div className="field">
         <span className="field-label">Function {loading && <span className="muted">(loading…)</span>}</span>
-        <select value={fnName} onChange={(e) => setFnName(e.target.value)} disabled={functions.length === 0}>
-          {functions.map((f) => <option key={f.name} value={f.name}>{f.name}({f.args.map((a) => a.name).join(", ")})</option>)}
-        </select>
-      </label>
+        <FunctionPicker functions={functions} value={fnName} onChange={setFnName} allowed={allowedHere} showReadOnly loading={loading} />
+      </div>
 
       {fn?.args.map((arg, i) => (
         <ArgInput

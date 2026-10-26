@@ -431,3 +431,12 @@ WP3 is cheap and unlocks both wallet and passkey, so do it right after WP2.
   passkey adds two more. Keep demo mode for rehearsals and as the fallback.
 - **Not audited**: the contract still has no key rotation or recovery. Passkey verification
   is security-sensitive; keep the tests adversarial and say so in the docs.
+
+## Function picker (call builder and policy editor)
+
+Both forms use a searchable picker (`web/src/FunctionPicker.tsx`, logic in `functions.ts`):
+functions are grouped into Actions and Read-only (a name-based heuristic; the call preview
+stays the authority), show argument types and descriptions, and mark functions the selected
+signer already has rules for. The picker opens on the first non-administrative action. The
+policy editor hides read-only functions behind a "Show read-only" toggle. Fields reset on the
+function's full signature, so a same-named function on another contract gets fresh fields.

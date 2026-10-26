@@ -35,6 +35,8 @@ export function useContractFunctions(contractId: string) {
     }
     let cancelled = false;
     setLoading(true);
+    // The previous contract's functions must not linger while the new ones load: a form would build its fields from them.
+    setFunctions([]);
     const timer = setTimeout(() => {
       fetchFunctions(id)
         .then((result) => !cancelled && (setFunctions(result), setError(null)))

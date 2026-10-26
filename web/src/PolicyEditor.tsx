@@ -4,6 +4,8 @@ import { describeRule, expiryText, shortAddress, type SignersResponse } from "./
 import { ArgInput } from "./ArgInput";
 import type { SigningVia } from "./api-types";
 import { ExpiryField } from "./ExpiryField";
+import { FunctionPicker } from "./FunctionPicker";
+import { defaultFunction, describeSignature, looksReadOnly } from "./functions";
 import { type ExpiryKind, toExpiry } from "./expiry";
 import { SignWith } from "./SignWith";
 import { delegatesFirst } from "./signers";
@@ -42,18 +44,25 @@ export function PolicyEditor({ demo = true, compact = false, data, busy, contrac
   useEffect(() => {
     if (data && (choice === "" || (choice === OTHER && !pickedOther && candidates.length > 0))) setChoice(candidates[0]?.id ?? OTHER);
   }, [data, choice, pickedOther, candidates]);
+  // A rule for a read-only function does nothing, so those are hidden unless asked for.
+  const [showReads, setShowReads] = useState(false);
+  const pickable = showReads ? functions : functions.filter((f) => !looksReadOnly(f.name));
   useEffect(() => {
-    if (!functions.some((f) => f.name === fnName)) setFnName(functions[0]?.name ?? "");
-  }, [functions, fnName]);
+    if (!pickable.some((f) => f.name === fnName)) setFnName(defaultFunction(pickable.length > 0 ? pickable : functions));
+  }, [functions, pickable.length, fnName]);
 
   const fn = functions.find((f) => f.name === fnName) ?? null;
+  // The constraints follow the function's whole signature, so a same-named function with other arguments resets them too.
+  const fnKey = fn ? describeSignature(fn) : "";
   // Address arguments default to "this account", the safe choice for a delegate; others to "any".
   useEffect(() => {
     setConstraints((fn?.args ?? []).map((a): ConstraintInput => ({ kind: a.kind === "address" ? "self" : "any" })));
-  }, [fn?.name, contract]);
+  }, [fnKey, contract]);
 
   const signerRef = choice === OTHER ? otherAddress.trim() : choice;
   const selected = data?.signers.find((s) => s.id === choice) ?? null;
+  // Functions the chosen signer already has a rule for on this contract.
+  const allowedHere = new Set(selected?.policy?.rules.filter((r) => r.contract === contract.trim()).map((r) => r.function) ?? []);
   const latest = data?.latestLedger ?? 0;
   const registered = selected?.registered ?? false;
   // A registered signer keeps its expiry (the table changes it); a new one needs one.
@@ -129,12 +138,21 @@ export function PolicyEditor({ demo = true, compact = false, data, busy, contrac
 
       {!compact && <h3>Allow a call</h3>}
       <div className="muted small contract-line">Contract: <strong>{nameOf(contract.trim())}</strong> (chosen above)</div>
-      <label className="field">
+      <div className="field">
         <span className="field-label">Function {loading && <span className="muted">(loading…)</span>}</span>
-        <select value={fnName} onChange={(e) => setFnName(e.target.value)} disabled={functions.length === 0}>
-          {functions.map((f) => <option key={f.name} value={f.name}>{f.name}({f.args.map((a) => a.name).join(", ")})</option>)}
-        </select>
-      </label>
+        <FunctionPicker
+          functions={functions}
+          value={fnName}
+          onChange={setFnName}
+          allowed={allowedHere}
+          showReadOnly={showReads}
+          onShowReadOnlyChange={setShowReads}
+          loading={loading}
+        />
+        {fn && looksReadOnly(fn.name) && (
+          <span className="muted small">This looks read-only: it needs no permission, so a rule for it has no effect.</span>
+        )}
+      </div>
 
       {fn?.args.map((arg, i) => {
         const constraint = constraints[i] ?? { kind: "any" as const };

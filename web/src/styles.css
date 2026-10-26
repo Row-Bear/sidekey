@@ -81,6 +81,28 @@ button.ghost { background: transparent; color: var(--accent); padding: 5px 12px;
 .activity-line code { word-break: break-all; }
 .activity-detail { word-break: break-word; }
 .activity-detail.bad { color: var(--bad); }
+.fn-picker { position: relative; }
+.fn-button {
+  width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; font-weight: 400;
+  background: #0d1117; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px;
+}
+.fn-button:hover:not(:disabled) { border-color: var(--accent); }
+.fn-chosen { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fn-pop {
+  position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 6px); display: grid; gap: 8px; padding: 10px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.fn-search { width: 100%; }
+.fn-toggle { display: flex; align-items: center; gap: 8px; color: var(--muted); cursor: pointer; }
+.fn-list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; display: grid; }
+.fn-group { padding: 8px 8px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.fn-item { display: grid; gap: 2px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+.fn-item.active { background: rgba(110, 168, 254, 0.12); }
+.fn-item.chosen strong { color: var(--accent); }
+.fn-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.fn-args { word-break: break-word; }
+.fn-doc { word-break: break-word; }
+.fn-empty { padding: 10px 8px; }
 .toast {
   position: fixed; right: 20px; bottom: 20px; z-index: 40; max-width: min(440px, calc(100vw - 40px));
   display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 10px;
