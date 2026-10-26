@@ -348,6 +348,13 @@ locally before sending, accepts base64 or hex, and catches the base64 trap with 
   signs everything in the browser. Checked by hand with a test wallet and a virtual authenticator: create and record
   an account, create a passkey, register it in the policy editor (wallet signs as master) and send a call as it.
 
+- Contract address book: a picker in the policy editor and the call builder (both pages) with the yield simulator,
+  the native XLM contract and the Blent fixed pool and backstop (testnet), plus entries the user saves (browser
+  local storage, named, renamable, removable). A contract's functions come from chain, so an entry is only a name
+  and an id; all four load (8, 16, 30 and 19 functions). The rule lists use the names. 14 unit tests (12 deliberate
+  breaks caught) cover parsing, adding, renaming and the limits. Also fixed: clearing the contract field used to
+  snap back to the simulator.
+
 ## Suggested cut line
 
 About 12 hours in total. If time is short, the value order is:

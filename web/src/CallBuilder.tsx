@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CallRequest, PreviewResult, SignerView } from "@poc/core";
 import { expiryText, requestPreview, shortAddress, type SignersResponse } from "./api";
+import { useAddressBook } from "./addressBook";
 import { ArgInput } from "./ArgInput";
+import { ContractPicker } from "./ContractPicker";
 import type { SigningVia } from "./api-types";
 import { useContractFunctions, useDebounced } from "./hooks";
 import { SignWith } from "./SignWith";
@@ -55,6 +57,7 @@ export function CallBuilder({ demo = true, data, busy, version, onSend }: {
   const simulator = data?.simulator ?? "";
   const account = data?.smartAccount ?? "";
   const [contract, setContract] = useState("");
+  const book = useAddressBook(data);
   const [fnName, setFnName] = useState("");
   const [args, setArgs] = useState<string[]>([]);
   const [signerId, setSignerId] = useState("");
@@ -62,9 +65,14 @@ export function CallBuilder({ demo = true, data, busy, version, onSend }: {
   const [via, setVia] = useState<SigningVia | "demo">(demo ? "demo" : "browser");
   const presetArgs = useRef<string[] | null>(null);
 
+  // The simulator is the starting contract; after that the field is the user's.
+  const defaultedContract = useRef(false);
   useEffect(() => {
-    if (simulator && contract === "") setContract(simulator);
-  }, [simulator, contract]);
+    if (simulator && !defaultedContract.current) {
+      defaultedContract.current = true;
+      setContract(simulator);
+    }
+  }, [simulator]);
   useEffect(() => {
     if (data && signerId === "") setSignerId(data.signers.find((s) => s.label === "delegate")?.id ?? "master");
   }, [data, signerId]);
@@ -141,11 +149,7 @@ export function CallBuilder({ demo = true, data, busy, version, onSend }: {
         </select>
       </label>
 
-      <label className="field">
-        <span className="field-label">Contract id</span>
-        <input value={contract} onChange={(e) => setContract(e.target.value)} spellCheck={false} placeholder="C…" />
-        {error && <span className="error small">{error}</span>}
-      </label>
+      <ContractPicker value={contract} onChange={setContract} book={book} error={error} />
 
       <label className="field">
         <span className="field-label">Function {loading && <span className="muted">(loading…)</span>}</span>

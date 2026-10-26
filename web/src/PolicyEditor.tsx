@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ConstraintInput, ExpiryInput, PolicyOp, RuleView } from "@poc/core";
 import { describeRule, expiryText, shortAddress, type SignersResponse } from "./api";
+import { useAddressBook } from "./addressBook";
 import { ArgInput } from "./ArgInput";
+import { ContractPicker } from "./ContractPicker";
 import type { SigningVia } from "./api-types";
 import { useContractFunctions } from "./hooks";
 import { SignWith } from "./SignWith";
@@ -31,6 +33,7 @@ export function PolicyEditor({ demo = true, data, busy, onApply }: {
   const [pickedOther, setPickedOther] = useState(false);
   const [otherAddress, setOtherAddress] = useState("");
   const [contract, setContract] = useState("");
+  const book = useAddressBook(data);
   const [fnName, setFnName] = useState("");
   const [constraints, setConstraints] = useState<ConstraintInput[]>([]);
   const [expiryKind, setExpiryKind] = useState<ExpiryKind>("minutes");
@@ -41,9 +44,14 @@ export function PolicyEditor({ demo = true, data, busy, onApply }: {
   useEffect(() => {
     if (data && (choice === "" || (choice === OTHER && !pickedOther && candidates.length > 0))) setChoice(candidates[0]?.id ?? OTHER);
   }, [data, choice, pickedOther, candidates]);
+  // The simulator is the starting contract; after that the field is the user's.
+  const defaultedContract = useRef(false);
   useEffect(() => {
-    if (data && contract === "") setContract(data.simulator);
-  }, [data, contract]);
+    if (data && !defaultedContract.current) {
+      defaultedContract.current = true;
+      setContract(data.simulator);
+    }
+  }, [data]);
 
   const { functions, loading, error } = useContractFunctions(contract);
   useEffect(() => {
@@ -111,7 +119,7 @@ export function PolicyEditor({ demo = true, data, busy, onApply }: {
           <ul>
             {selected.policy.rules.map((rule: RuleView) => (
               <li key={`${rule.contract}.${rule.function}.${rule.args.map((a) => a.kind).join()}`}>
-                <code>{describeRule(rule)}</code> <span className="muted small">on {shortAddress(rule.contract)}</span>
+                <code>{describeRule(rule)}</code> <span className="muted small">on {book.nameOf(rule.contract)}</span>
                 <button
                   className="ghost small-btn"
                   disabled={busy}
@@ -126,11 +134,7 @@ export function PolicyEditor({ demo = true, data, busy, onApply }: {
       )}
 
       <h3>Allow a call</h3>
-      <label className="field">
-        <span className="field-label">Contract id</span>
-        <input value={contract} onChange={(e) => setContract(e.target.value)} spellCheck={false} placeholder="C…" />
-        {error && <span className="error small">{error}</span>}
-      </label>
+      <ContractPicker value={contract} onChange={setContract} book={book} error={error} />
       <label className="field">
         <span className="field-label">Function {loading && <span className="muted">(loading…)</span>}</span>
         <select value={fnName} onChange={(e) => setFnName(e.target.value)} disabled={functions.length === 0}>

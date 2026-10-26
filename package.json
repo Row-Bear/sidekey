@@ -13,7 +13,7 @@
     "setup:accounts": "tsx scripts/01-setup-accounts.ts",
     "build:contract": "stellar contract build",
     "test:contract": "cargo test -p smart-account",
-    "test:web": "tsx --test web/server/guard.test.ts",
+    "test:web": "tsx --test web/server/guard.test.ts web/src/addressBook.test.ts",
     "test:core": "tsx --test packages/core/test/*.test.ts",
     "e2e:broker": "tsx spikes/broker/run.ts",
     "e2e:wallet": "tsx spikes/broker/wallet-mode.ts",

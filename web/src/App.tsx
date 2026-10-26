@@ -16,6 +16,7 @@ import {
 } from "./api";
 import { CallBuilder } from "./CallBuilder";
 import { CallHistory } from "./CallHistory";
+import { useAddressBook } from "./addressBook";
 import { useSigners } from "./hooks";
 import { PasskeyPanel } from "./PasskeyPanel";
 import { passkeySigner } from "./passkey";
@@ -93,11 +94,10 @@ function Balances({ state }: { state: DemoState }) {
   );
 }
 
-function RuleLine({ rule, simulator }: { rule: RuleView; simulator: string }) {
-  const where = rule.contract === simulator ? "yield simulator" : shortAddress(rule.contract);
+function RuleLine({ rule, nameOf }: { rule: RuleView; nameOf: (id: string) => string }) {
   return (
     <li>
-      <code>{describeRule(rule)}</code> on {where}
+      <code>{describeRule(rule)}</code> on {nameOf(rule.contract)}
     </li>
   );
 }
@@ -109,7 +109,7 @@ function ExpiryLine({ validUntil, latest }: { validUntil: number | null; latest:
   return <span className="tag">{expiryText(validUntil, latest)}</span>;
 }
 
-function Policy({ state, demo }: { state: DemoState; demo: boolean }) {
+function Policy({ state, demo, nameOf }: { state: DemoState; demo: boolean; nameOf: (id: string) => string }) {
   const policy = state.delegatePolicy;
   const showDelegate = demo || state.delegate === "passkey";
   return (
@@ -148,7 +148,7 @@ function Policy({ state, demo }: { state: DemoState; demo: boolean }) {
                         <RuleLine
                           key={`${rule.contract}.${rule.function}.${rule.args.map((a) => a.kind).join()}`}
                           rule={rule}
-                          simulator={state.accounts.simulator}
+                          nameOf={nameOf}
                         />
                       ))}
                     </ul>
@@ -257,6 +257,7 @@ export default function App({ variant }: { variant: Variant }) {
     wasBusy.current = busy;
   }, [busy]);
   const { data: signersData, error: signersError } = useSigners(signersVersion, demo);
+  const book = useAddressBook(signersData);
   const wallet = useWallet();
   const passkey = state?.passkey ?? null;
   const signers = useMemo(() => [...wallet.signers, ...(passkey ? [passkeySigner(passkey)] : [])], [wallet.signers, passkey]);
@@ -393,11 +394,11 @@ export default function App({ variant }: { variant: Variant }) {
             {demo ? (
               <>
                 <Balances state={state} />
-                <Policy state={state} demo={demo} />
+                <Policy state={state} demo={demo} nameOf={book.nameOf} />
               </>
             ) : (
               <>
-                <Policy state={state} demo={demo} />
+                <Policy state={state} demo={demo} nameOf={book.nameOf} />
                 <Balances state={state} />
               </>
             )}
