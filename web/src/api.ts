@@ -125,6 +125,10 @@ export type StepStatus = "pending" | "running" | "succeeded" | "blocked" | "unex
 const SECONDS_PER_LEDGER = 5;
 
 /** e.g. "expires in about 12 min (ledger 5,389,030)". */
+/** Shortens every full G or C address inside a text (a call's title), so a long id does not take over a line. */
+export const shortenAddresses = (text: string): string =>
+  text.replace(/\b[GC][A-Z2-7]{55}\b/g, (address) => `${address.slice(0, 6)}…${address.slice(-6)}`);
+
 /** A plain-language version of a contract or host error, with the original kept for anyone who wants it. */
 export function friendlyError(raw: string): { summary: string; detail?: string } {
   if (/Storage, MissingValue/.test(raw)) {

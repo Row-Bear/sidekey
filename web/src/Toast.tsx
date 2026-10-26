@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { CallRecord } from "@poc/core";
-import { friendlyError } from "./api";
+import { friendlyError, shortenAddresses } from "./api";
 
 type Kind = "success" | "cancelled" | "blocked" | "failure";
 
@@ -30,7 +30,7 @@ export function Toast({ record, onDismiss }: { record: CallRecord; onDismiss: ()
     <div className={`toast ${kind}`} role="status" aria-live="polite">
       <div className="toast-body">
         <strong>{HEADLINE[kind]}</strong>
-        <code className="toast-title">{record.title}</code>
+        <code className="toast-title" title={record.title}>{shortenAddresses(record.title)}</code>
         {record.explorerUrl && (
           <a href={record.explorerUrl} target="_blank" rel="noreferrer">
             View transaction {record.txHash?.slice(0, 10)}…

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { describeRule, durationText, friendlyError } from "./api.ts";
+import { describeRule, durationText, friendlyError, shortenAddresses } from "./api.ts";
 
 describe("friendlyError", () => {
   it("explains a missing-data host error and keeps the original", () => {
@@ -54,5 +54,25 @@ describe("describeRule", () => {
       }),
       "transfer(this account, any, < 100, = 7)",
     );
+  });
+});
+
+describe("shortenAddresses", () => {
+  const contract = "CDG2EA4B67V4F3D2W2TCWCOFBKZ5IVSLXTOHTEKIEWZZLYRSHMOAV2G5";
+  const account = "GDFSJ7OFK7CFF6YOSRGKQU435BXEBW5ODEU5SMD4VUNCHTQDTSPPXIVZ";
+
+  it("shortens each full address and leaves the rest of the text alone", () => {
+    assert.equal(shortenAddresses(`withdraw(${contract}, 500)`), "withdraw(CDG2EA…OAV2G5, 500)");
+    assert.equal(shortenAddresses(`${account} to ${contract}`), "GDFSJ7…PPXIVZ to CDG2EA…OAV2G5");
+  });
+
+  it("does not touch short ids, words or text without addresses", () => {
+    assert.equal(shortenAddresses("passkey 028eea6e… claim(this account)"), "passkey 028eea6e… claim(this account)");
+    assert.equal(shortenAddresses("GABC and CDEF"), "GABC and CDEF");
+  });
+
+  it("does not cut into a longer run of letters", () => {
+    const longer = `X${contract}`;
+    assert.equal(shortenAddresses(longer), longer);
   });
 });

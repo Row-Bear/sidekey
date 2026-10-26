@@ -470,7 +470,7 @@ export default function App({ variant }: { variant: Variant }) {
                 </p>
               </section>
             )}
-            <CallBuilder demo={demo} walletReady={walletOwns} data={signersData} busy={busy} version={signersVersion} contract={contract} onContractChange={setContract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onSend={(call, via) => void start({ action: "call", call, via })} />
+            <CallBuilder demo={demo} walletReady={walletOwns} data={signersData} busy={busy} version={signersVersion} contract={contract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onSend={(call, via) => void start({ action: "call", call, via })} />
           </div>
             </>
           )}
@@ -526,7 +526,7 @@ export default function App({ variant }: { variant: Variant }) {
             </>
           )}
           {state.pendingSignatures[0] && <SigningModal request={state.pendingSignatures[0]} signers={signers} onDone={() => void refresh()} />}
-          {(demo || ready) && <CallHistory calls={state.calls} />}
+          {(demo || ready) && <CallHistory calls={state.calls} compact={!demo} />}
 
           {state.run.log.length > 0 &&
             (demo ? (

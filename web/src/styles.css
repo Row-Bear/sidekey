@@ -68,6 +68,19 @@ button.ghost { background: transparent; color: var(--accent); padding: 5px 12px;
 .policy-table td { vertical-align: top; }
 .row-actions { margin-top: 8px; }
 .inline-form { display: grid; gap: 8px; max-width: 420px; }
+.activity { list-style: none; margin: 0 0 10px; padding: 0; display: grid; }
+.activity-row { display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.activity-row:last-child { border-bottom: 0; }
+.activity-icon { width: 18px; flex: none; text-align: center; font-weight: 700; }
+.activity-row.succeeded .activity-icon { color: var(--ok); }
+.activity-row.unexpected .activity-icon { color: var(--bad); }
+.activity-row.blocked .activity-icon { color: var(--warn); }
+.activity-row.cancelled .activity-icon { color: var(--muted); }
+.activity-main { min-width: 0; display: grid; gap: 3px; }
+.activity-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.activity-line code { word-break: break-all; }
+.activity-detail { word-break: break-word; }
+.activity-detail.bad { color: var(--bad); }
 .toast {
   position: fixed; right: 20px; bottom: 20px; z-index: 40; max-width: min(440px, calc(100vw - 40px));
   display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 10px;
@@ -137,6 +150,7 @@ td > .tag:first-child { margin: 0 0 6px; display: inline-block; }
 .step.succeeded { border-left-color: var(--ok); }
 .step.blocked { border-left-color: var(--warn); }
 .step.unexpected { border-left-color: var(--bad); }
+.step.cancelled { border-left-color: var(--muted); }
 .step.running { border-left-color: var(--accent); background: rgba(110, 168, 254, 0.06); }
 .step-head { display: flex; align-items: center; gap: 12px; }
 .step-n { width: 26px; height: 26px; border-radius: 50%; background: var(--border); display: grid; place-items: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
@@ -145,6 +159,7 @@ td > .tag:first-child { margin: 0 0 6px; display: inline-block; }
 .status.succeeded { color: var(--ok); }
 .status.blocked { color: var(--warn); }
 .status.unexpected { color: var(--bad); }
+.status.cancelled { color: var(--muted); }
 .status.running { color: var(--accent); }
 .status.pending { color: var(--muted); }
 .step-body { margin: 10px 0 0 38px; display: grid; gap: 5px; font-size: 13.5px; }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CallRequest, FunctionInfo, PreviewResult, SignerView } from "@poc/core";
 import { expiryText, friendlyError, requestPreview, shortAddress, type SignersResponse } from "./api";
 import { ArgInput } from "./ArgInput";
@@ -6,6 +6,7 @@ import type { SigningVia } from "./api-types";
 import { useDebounced } from "./hooks";
 import { SignWith } from "./SignWith";
 import { delegatesFirst } from "./signers";
+import { examplesFor } from "./examples";
 
 function signerOptionLabel(signer: SignerView, latestLedger: number, demo: boolean): string {
   if (signer.label === "master") return `master ${shortAddress(signer.address)}: may authorize anything`;
@@ -52,7 +53,7 @@ function PreviewBox({ preview }: { preview: PreviewResult | "loading" | null }) 
   );
 }
 
-export function CallBuilder({ demo = true, walletReady = true, data, busy, version, contract, onContractChange, functions, loading, nameOf, onSend }: {
+export function CallBuilder({ demo = true, walletReady = true, data, busy, version, contract, functions, loading, nameOf, onSend }: {
   /** The guided demo can sign with the keys it holds; the plain page always signs in the browser (wallet, passkey or pasted). */
   demo?: boolean;
   /** Whether the master can sign now (the wallet that owns the account is connected). The delegate's passkey needs no wallet. */
@@ -63,7 +64,6 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   version: number;
   /** The contract chosen in the shared picker, and its functions. */
   contract: string;
-  onContractChange: (id: string) => void;
   functions: FunctionInfo[];
   loading: boolean;
   nameOf: (id: string) => string;
@@ -110,18 +110,10 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
     };
   }, [requestKey, version]);
 
-  const example = useMemo(
-    () => [
-      { label: "claim(this account)", contract: simulator, fn: "claim", args: [account] },
-      { label: "withdraw(this account, 1 XLM)", contract: simulator, fn: "withdraw", args: [account, "10000000"] },
-      // Sends XLM from the smart account back to the master, e.g. to run the demo again from a wallet.
-      { label: "send 1 XLM to the master", contract: data?.nativeToken ?? "", fn: "transfer", args: [account, data?.master ?? "", "10000000"] },
-    ],
-    [account, simulator, data?.nativeToken, data?.master],
-  );
-  const applyExample = (e: { contract: string; fn: string; args: string[] }) => {
+  // Examples belong to the selected contract, so choosing one only fills in the function and its arguments.
+  const examples = examplesFor(contract, { simulator, nativeToken: data?.nativeToken ?? "", account, master: data?.master ?? "" });
+  const applyExample = (e: { fn: string; args: string[] }) => {
     presetArgs.current = e.args;
-    onContractChange(e.contract);
     setFnName(e.fn);
     setArgs(e.args);
   };
@@ -138,14 +130,16 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
         Pick a signer and a call. The policy check below runs the real simulation and tests every call the account
         would have to authorize, without sending anything.
       </p>
-      <div className="chips">
-        <span className="muted small">Examples:</span>
-        {example.map((e) => (
-          <button key={e.label} type="button" className="chip" disabled={!e.contract} onClick={() => applyExample(e)}>
-            {e.label}
-          </button>
-        ))}
-      </div>
+      {examples.length > 0 && (
+        <div className="chips">
+          <span className="muted small">Examples:</span>
+          {examples.map((e) => (
+            <button key={e.label} type="button" className="chip" onClick={() => applyExample(e)}>
+              {e.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <label className="field">
         <span className="field-label">Call as</span>

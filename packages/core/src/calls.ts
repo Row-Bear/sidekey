@@ -114,8 +114,9 @@ function keyFor(ctx: ScenarioContext, id: string): Keypair | null {
   return id === hexOf(ctx.delegate.rawPublicKey()) ? ctx.delegate : null;
 }
 
-const labelFor = (ctx: ScenarioContext, id: string) =>
-  id === "master" ? "master" : id === hexOf(delegateKey(ctx)) ? "delegate" : `${id.slice(0, 8)}…`;
+/** How a signer is named in a record's title: master, delegate, or a readable key (a G address, or `passkey 1a2b3c4d…`). */
+export const labelFor = (ctx: ScenarioContext, id: string) =>
+  id === "master" ? "master" : id === hexOf(delegateKey(ctx)) ? "delegate" : nameOf(Buffer.from(id, "hex"));
 
 function authorizersFor(ctx: ScenarioContext, id: string, key: Keypair): Authorizer[] {
   const authorizers: Authorizer[] = [{ kind: "smart", address: ctx.smartAccountId, keypair: key }];

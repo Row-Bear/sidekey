@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { contractErrorSource } from "../src/calls.ts";
+import { Keypair, StrKey } from "@stellar/stellar-sdk";
+import { contractErrorSource, labelFor } from "../src/calls.ts";
+import type { ScenarioContext } from "../src/scenario.ts";
 
 // Real simulator logs: a failed `withdraw` inside the yield simulator...
 const simulatorFailure = `HostError: Error(Contract, #2)
@@ -36,5 +38,30 @@ describe("contractErrorSource", () => {
 
   it("returns null when there is no contract error", () => {
     assert.equal(contractErrorSource("HostError: Error(Auth, InvalidAction)"), null);
+  });
+});
+
+describe("labelFor", () => {
+  const delegate = Keypair.random();
+  const passkey = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]);
+  const hex = (raw: Uint8Array) => Buffer.from(raw).toString("hex");
+  const withKey = { delegate } as unknown as ScenarioContext;
+  const withPasskey = { delegate, delegatePasskey: { publicKey: passkey } } as unknown as ScenarioContext;
+
+  it("names the master and the active delegate", () => {
+    assert.equal(labelFor(withKey, "master"), "master");
+    assert.equal(labelFor(withKey, hex(delegate.rawPublicKey())), "delegate");
+    assert.equal(labelFor(withPasskey, hex(passkey)), "delegate");
+  });
+
+  it("names any other key readably: a G address, or a short passkey", () => {
+    const other = Keypair.random();
+    assert.equal(labelFor(withKey, hex(other.rawPublicKey())), other.publicKey());
+    assert.ok(StrKey.isValidEd25519PublicKey(labelFor(withKey, hex(other.rawPublicKey()))));
+    assert.equal(labelFor(withKey, hex(passkey)), "passkey 07070707…");
+  });
+
+  it("does not call the demo key the delegate once a passkey is the delegate", () => {
+    assert.equal(labelFor(withPasskey, hex(delegate.rawPublicKey())), delegate.publicKey());
   });
 });
