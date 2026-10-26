@@ -196,3 +196,13 @@ export function evaluateCalls(
   }
   return { allowed: true };
 }
+
+const showValue = (value: unknown): string =>
+  JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? `0x${Buffer.from(v).toString("hex")}` : v));
+
+/** One line per invocation, e.g. `claim(CBG6…) on CDGO…`. */
+export function describeCall(call: CallContext): string {
+  return call.kind === "other"
+    ? call.description
+    : `${call.function}(${call.args.map((a) => showValue(scValToNative(a)).replace(/^"|"$/g, "")).join(", ")}) on ${call.contract}`;
+}

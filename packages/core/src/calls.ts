@@ -4,6 +4,7 @@ import { type Authorizer, invoke, type InvokeResult, read, recordAuthContexts } 
 import type { CallRecord } from "./history.js";
 import {
   type CallContext,
+  describeCall,
   describeRule,
   evaluateCalls,
   optionLedgerScVal,
@@ -34,6 +35,12 @@ export interface SignerView {
   /** Null for the master (no rules) and for signers that are not registered. */
   policy: SignerPolicyView | null;
 }
+
+/**
+ * Where a call's signatures come from. By default the demo signs with the keys it holds; a browser
+ * provider (wallet, passkey) returns authorizers that ask the browser instead.
+ */
+export type SigningSource = (signer: { id: string; label: string; raw: Uint8Array }) => Authorizer[];
 
 const hexOf = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
 
@@ -111,15 +118,6 @@ export type PreviewResult =
   | { status: "simulation-failed"; message: string }
   | { status: "invalid"; message: string };
 
-const show = (value: unknown): string =>
-  JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? `0x${hexOf(v)}` : v));
-
-function describeContext(call: CallContext): string {
-  return call.kind === "other"
-    ? call.description
-    : `${call.function}(${call.args.map((a) => show(scValToNative(a)).replace(/^"|"$/g, "")).join(", ")}) on ${call.contract}`;
-}
-
 /**
  * Finds the contract that raised a contract error in a simulator error log. Only an event whose own
  * topic is the contract error counts: a failed `__check_auth` also mentions an `Error(Contract, #N)`,
@@ -164,7 +162,7 @@ export async function previewCall(ctx: ScenarioContext, req: CallRequest): Promi
 
   const recorded = await recordAuthContexts(ctx, params, ctx.smartAccountId);
   if (!recorded.ok) return { status: "simulation-failed", message: await explainFailure(ctx, recorded.error, recorded.detail) };
-  const tree = recorded.calls.map(describeContext);
+  const tree = recorded.calls.map(describeCall);
 
   const signer = parseSigner(req.signer);
   if (signer.id === "master") {
@@ -207,11 +205,11 @@ function failure(base: Pick<CallRecord, "kind" | "title" | "signer">, message: s
 }
 
 /** Sends a call signed by the chosen signer (only signers whose key this demo holds). */
-export async function runCall(ctx: ScenarioContext, req: CallRequest): Promise<CallRecord> {
+export async function runCall(ctx: ScenarioContext, req: CallRequest, signing?: SigningSource): Promise<CallRecord> {
   const signer = parseSigner(req.signer);
   const base = { kind: "call" as const, title: `${req.function}(${req.args.join(", ")})`, signer: labelFor(ctx, signer.id) };
-  const key = keyFor(ctx, signer.id);
-  if (!key) return failure(base, "This demo does not hold a key for that signer", "signing");
+  const key = signing ? null : keyFor(ctx, signer.id);
+  if (!signing && !key) return failure(base, "This demo does not hold a key for that signer", "signing");
 
   let params;
   try {
@@ -220,7 +218,10 @@ export async function runCall(ctx: ScenarioContext, req: CallRequest): Promise<C
     return failure(base, err instanceof Error ? err.message : String(err), "input");
   }
   try {
-    const result = await invoke(ctx, { ...params, authorizers: authorizersFor(ctx, signer.id, key) });
+    const authorizers = signing
+      ? signing({ id: signer.id, label: base.signer, raw: signer.raw ?? ctx.master.rawPublicKey() })
+      : authorizersFor(ctx, signer.id, key!);
+    const result = await invoke(ctx, { ...params, authorizers });
     return toRecord(base, result.ok ? result : { ...result, error: await explainFailure(ctx, result.error, result.detail) });
   } catch (err) {
     return failure(base, err instanceof Error ? err.message : String(err), "signing");
@@ -295,14 +296,16 @@ function describePolicyOp(ctx: ScenarioContext, op: PolicyOp): string {
 }
 
 /** Applies a policy edit on the smart account, signed by the master. */
-export async function runPolicyOp(ctx: ScenarioContext, op: PolicyOp): Promise<CallRecord> {
+export async function runPolicyOp(ctx: ScenarioContext, op: PolicyOp, signing?: SigningSource): Promise<CallRecord> {
   const base = { kind: "policy" as const, title: "", signer: "master" };
   try {
     const signer = parseSigner(op.signer);
     if (signer.id === "master" || !signer.raw) throw new Error("The master has no policy; pick a delegate signer");
     base.title = describePolicyOp(ctx, op);
     const signerId = signerIdScVal(signer.raw);
-    const authorizers = authorizersFor(ctx, "master", ctx.master);
+    const authorizers = signing
+      ? signing({ id: "master", label: "master", raw: ctx.master.rawPublicKey() })
+      : authorizersFor(ctx, "master", ctx.master);
 
     let method: string;
     let args: xdr.ScVal[];

@@ -1,4 +1,4 @@
-import type { CallRecord, CallRequest, PolicyOp, SignerPolicyView, Snapshot, StepResult } from "@poc/core";
+import type { CallRecord, CallRequest, PendingSignature, PolicyOp, SignerPolicyView, Snapshot, StepResult } from "@poc/core";
 
 export interface StepMeta {
   n: number;
@@ -28,6 +28,8 @@ export interface DemoState {
   results: Record<string, StepResult>;
   /** Calls made from the call builder and policy edits, newest first. */
   calls: CallRecord[];
+  /** Signatures the server is waiting for the browser to provide. */
+  pendingSignatures: PendingSignature[];
   run: {
     busy: boolean;
     /** The step being executed right now, if any. */
@@ -42,6 +44,9 @@ export interface DemoState {
 export type RunRequest =
   | { action: "full" }
   | { action: "fresh" }
-  | { action: "steps"; from: number; to: number }
-  | { action: "call"; call: CallRequest }
-  | { action: "policy"; policy: PolicyOp };
+  | { action: "steps"; from: number; to: number; via?: SigningVia }
+  | { action: "call"; call: CallRequest; via?: SigningVia }
+  | { action: "policy"; policy: PolicyOp; via?: SigningVia };
+
+/** Where signatures come from: the demo's own keys (default) or the browser (wallet, passkey, pasted). */
+export type SigningVia = "browser";

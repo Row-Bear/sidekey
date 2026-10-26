@@ -168,7 +168,7 @@ client accepts both common encodings).
 - Done when: a user can allow `claim` for the delegate, call it as the delegate, and see
   `withdraw` rejected, all from the form.
 
-### WP3: Signature broker (foundation for goals 4 and 5; about 2 h)
+### WP3: Signature broker (foundation for goals 4 and 5; about 2 h) — done
 
 - [x] **Hardening first** (done): every `/api` request now goes through `web/server/guard.ts`.
       It requires a localhost `Host` header (also blocks DNS rebinding), refuses a cross-origin
@@ -177,14 +177,37 @@ client accepts both common encodings).
       the real attack (cross-origin `text/plain` POST asking for a `fresh` run).
 - [x] The dev server binds to `localhost` explicitly, and re-reads `.env` on every request, so
       a CLI `--fresh` run can no longer leave the dashboard acting on a different account.
-- [ ] Remote signer in `packages/core` (returns a promise that the server resolves when the
-      browser posts), with a timeout (about 3 min) and cancellation.
-- [ ] `pendingSignature` in the state; `POST /api/signature`; reject a stale or unknown id,
-      allow each id once.
-- [ ] A signing modal in the UI showing what is being signed (contract, function,
-      arguments, signer) before the wallet or passkey prompt opens.
+- [x] **Broker** (`packages/core/src/broker.ts`): a job awaits a promise; the browser sees a
+      pending item and answers it. The server verifies every answer against the one key the
+      request is for (the browser cannot choose the signer): a `payload` signature (what
+      `signAuthEntry` returns) or a SEP-53 `message` signature (what `signMessage` returns). A wrong
+      or malformed answer is refused and the request **stays pending** so the person can retry; a
+      good one resolves the job exactly once. Cancel rejects the job with `SigningCancelled`; a
+      request times out after 3 minutes. 14 tests with a mock signer, mutation-checked (verification
+      removed, request not consumed, a bad answer consuming the request).
+- [x] **Jobs can sign in the browser**: `via: "browser"` on call, policy and step jobs; scenario
+      steps take `ctx.remoteSigners`, calls and policy edits take a `SigningSource`. A scenario
+      step pauses for the browser and then continues (tested on testnet with step 1).
+- [x] **State and endpoint**: `pendingSignatures` in `GET /api/state`; `POST /api/signature`
+      with `{id, response}` or `{id, cancel: true}` (200 accepted, 404 unknown or already used,
+      422 invalid signature, 400 malformed).
+- [x] **Signing modal** (`web/src/SigningModal.tsx`): shows who signs, what is being authorized
+      (every invocation), a countdown, and a manual path (copy the payload or the SEP-53 message,
+      paste a signature in base64 or hex). The policy editor and call builder have a "Sign with"
+      choice (demo keys or my signature). `web/src/signing.ts` is the registry where WP4 (wallet)
+      and WP5 (passkey) add one-click signers; it is empty for now.
+- [x] Verified end to end on testnet over HTTP (`npm run e2e:broker`, spikes/broker/run.ts):
+      pause, wrong signer refused and still pending, right signer accepted, replay refused,
+      message-kind answer, cancel, scenario step 1 via the browser, malformed answers. Also
+      verified in the dashboard: wrong signature shows the server's refusal and the modal stays
+      open; the right one closes it and the transaction completes.
 - Done when: a scenario step can pause for a browser signature and continue, using a mock
-  signer in a test.
+  signer in a test. Met.
+- Limits: only the smart account's own signature can come from the browser. Calls the G account
+  itself must authorize (step 2's transfer) still need the demo key, so step 2 is not offered
+  with browser signing. Pending requests live in the server's memory and are lost on a restart.
+  The modal prints call arguments as plain values, so a signer enum shows as
+  `["Ed25519","0x…"]`.
 
 ### WP4: Wallet connection, xBull (goal 4; about 2.5 h)
 

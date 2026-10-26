@@ -1,4 +1,4 @@
-import { Address, Keypair, nativeToScVal, rpc } from "@stellar/stellar-sdk";
+import { Address, Keypair, nativeToScVal, rpc, type xdr } from "@stellar/stellar-sdk";
 import { Authorizer, ChainContext, invoke, InvokeResult, read } from "./chain.js";
 import { DEFAULT_RPC_URL, NATIVE_TOKEN_ID, requireEnv, STROOPS_PER_XLM } from "./config.js";
 import { optionLedgerScVal, parseSignerPolicy, rulesScVal, signerIdScVal, type SignerPolicyView } from "./policy.js";
@@ -12,7 +12,15 @@ export const DELEGATE_VALIDITY_LEDGERS = 30 * LEDGERS_PER_MINUTE;
 /** Window used by the optional expiry demo (about 1 minute). */
 export const SHORT_VALIDITY_LEDGERS = LEDGERS_PER_MINUTE;
 
+/** Produces the smart account's signature somewhere else (a wallet, a passkey, a person). */
+export type RemoteSign = (preimageXdr: string, payload: Uint8Array) => Promise<xdr.ScVal>;
+
 export interface ScenarioContext extends ChainContext {
+  /**
+   * When set for a role, that role's smart-account signatures come from here instead of the
+   * server-held key. Calls the G account itself must authorize (step 2) still need the key.
+   */
+  remoteSigners?: Partial<Record<"master" | "delegate", RemoteSign>>;
   rpcUrl: string;
   master: Keypair;
   delegate: Keypair;
@@ -76,11 +84,12 @@ const i128 = (n: bigint) => nativeToScVal(n, { type: "i128" });
 
 const xlm = (stroops: bigint) => `${(Number(stroops) / Number(STROOPS_PER_XLM)).toLocaleString("en-US", { maximumFractionDigits: 7 })} XLM`;
 
-const smartAuth = (ctx: ScenarioContext, who: "master" | "delegate"): Authorizer => ({
-  kind: "smart",
-  address: ctx.smartAccountId,
-  keypair: who === "master" ? ctx.master : ctx.delegate,
-});
+const smartAuth = (ctx: ScenarioContext, who: "master" | "delegate"): Authorizer => {
+  const remote = ctx.remoteSigners?.[who];
+  return remote
+    ? { kind: "smart-remote", address: ctx.smartAccountId, sign: remote }
+    : { kind: "smart", address: ctx.smartAccountId, keypair: who === "master" ? ctx.master : ctx.delegate };
+};
 
 async function bigintView(ctx: ScenarioContext, contract: string, method: string, user: string): Promise<bigint> {
   return BigInt((await read(ctx, contract, method, [addr(user)])) as bigint);

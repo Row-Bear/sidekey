@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CallRequest, PreviewResult, SignerView } from "@poc/core";
 import { expiryText, requestPreview, shortAddress, type SignersResponse } from "./api";
 import { ArgInput } from "./ArgInput";
+import type { SigningVia } from "./api-types";
 import { useContractFunctions, useDebounced } from "./hooks";
+import { SignWith } from "./SignWith";
 
 function signerOptionLabel(signer: SignerView, latestLedger: number): string {
   if (signer.label === "master") return `master ${shortAddress(signer.address)}: may authorize anything`;
@@ -46,7 +48,7 @@ export function CallBuilder({ data, busy, version, onSend }: {
   busy: boolean;
   /** Bumps when on-chain state may have changed, so the preview refreshes. */
   version: number;
-  onSend: (call: CallRequest) => void;
+  onSend: (call: CallRequest, via?: SigningVia) => void;
 }) {
   const simulator = data?.simulator ?? "";
   const account = data?.smartAccount ?? "";
@@ -55,6 +57,7 @@ export function CallBuilder({ data, busy, version, onSend }: {
   const [args, setArgs] = useState<string[]>([]);
   const [signerId, setSignerId] = useState("");
   const [preview, setPreview] = useState<PreviewResult | "loading" | null>(null);
+  const [via, setVia] = useState<SigningVia | "demo">("demo");
   const presetArgs = useRef<string[] | null>(null);
 
   useEffect(() => {
@@ -106,7 +109,8 @@ export function CallBuilder({ data, busy, version, onSend }: {
   };
 
   const rejected = preview !== null && preview !== "loading" && preview.status === "rejected";
-  const canSend = !busy && request !== null && signer?.hasKey === true;
+  // With demo keys only signers the demo holds a key for can send; in the browser anyone can be asked.
+  const canSend = !busy && request !== null && (via === "browser" || signer?.hasKey === true);
 
   return (
     <section className="card">
@@ -128,7 +132,7 @@ export function CallBuilder({ data, busy, version, onSend }: {
         <span className="field-label">Signer</span>
         <select value={signerId} onChange={(e) => setSignerId(e.target.value)} disabled={!data}>
           {data?.signers.map((s) => (
-            <option key={s.id} value={s.id} disabled={!s.hasKey}>{signerOptionLabel(s, data.latestLedger)}</option>
+            <option key={s.id} value={s.id} disabled={!s.hasKey && via !== "browser"}>{signerOptionLabel(s, data.latestLedger)}</option>
           ))}
         </select>
       </label>
@@ -156,13 +160,15 @@ export function CallBuilder({ data, busy, version, onSend }: {
         />
       ))}
 
+      <SignWith value={via} onChange={setVia} disabled={busy} />
+
       <PreviewBox preview={preview} />
 
       <div className="actions">
-        <button disabled={!canSend} onClick={() => request && onSend(request)}>
+        <button disabled={!canSend} onClick={() => request && onSend(request, via === "browser" ? "browser" : undefined)}>
           {busy ? "Working…" : rejected ? "Send anyway (expect a rejection)" : "Send"}
         </button>
-        {signer && !signer.hasKey && <span className="muted small">This demo holds no key for that signer.</span>}
+        {signer && !signer.hasKey && via !== "browser" && <span className="muted small">This demo holds no key for that signer.</span>}
       </div>
     </section>
   );

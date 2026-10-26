@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import type { ConstraintInput, ExpiryInput, PolicyOp, RuleView } from "@poc/core";
 import { describeRule, expiryText, shortAddress, type SignersResponse } from "./api";
 import { ArgInput } from "./ArgInput";
+import type { SigningVia } from "./api-types";
 import { useContractFunctions } from "./hooks";
+import { SignWith } from "./SignWith";
 
 const LEDGERS_PER_MINUTE = 12;
 const OTHER = "other";
@@ -19,7 +21,7 @@ function toExpiry(kind: ExpiryKind, value: string): ExpiryInput | null {
 export function PolicyEditor({ data, busy, onApply }: {
   data: SignersResponse | null;
   busy: boolean;
-  onApply: (op: PolicyOp) => void;
+  onApply: (op: PolicyOp, via?: SigningVia) => void;
 }) {
   const candidates = data?.signers.filter((s) => s.label !== "master") ?? [];
   const [choice, setChoice] = useState("");
@@ -29,6 +31,8 @@ export function PolicyEditor({ data, busy, onApply }: {
   const [constraints, setConstraints] = useState<ConstraintInput[]>([]);
   const [expiryKind, setExpiryKind] = useState<ExpiryKind>("minutes");
   const [expiryValue, setExpiryValue] = useState("30");
+  const [via, setVia] = useState<SigningVia | "demo">("demo");
+  const apply = (op: PolicyOp) => onApply(op, via === "browser" ? "browser" : undefined);
 
   useEffect(() => {
     if (data && choice === "") setChoice(candidates[0]?.id ?? OTHER);
@@ -100,7 +104,7 @@ export function PolicyEditor({ data, busy, onApply }: {
                 <button
                   className="ghost small-btn"
                   disabled={busy}
-                  onClick={() => onApply({ op: "remove-rule", signer: signerRef, contract: rule.contract, function: rule.function })}
+                  onClick={() => apply({ op: "remove-rule", signer: signerRef, contract: rule.contract, function: rule.function })}
                 >
                   Remove
                 </button>
@@ -169,11 +173,13 @@ export function PolicyEditor({ data, busy, onApply }: {
         {expiry === null && <span className="error small">Enter a number greater than zero</span>}
       </div>
 
+      <SignWith value={via} onChange={setVia} disabled={busy} />
+
       <div className="actions">
         <button
           disabled={!canAllow}
           onClick={() =>
-            fn && expiry && onApply({ op: "allow", signer: signerRef, contract: contract.trim(), function: fn.name, constraints, expiry })
+            fn && expiry && apply({ op: "allow", signer: signerRef, contract: contract.trim(), function: fn.name, constraints, expiry })
           }
         >
           {busy ? "Working…" : registered ? "Allow this call" : "Register signer and allow this call"}
@@ -181,12 +187,12 @@ export function PolicyEditor({ data, busy, onApply }: {
         <button
           className="ghost"
           disabled={busy || !registered || expiry === null}
-          onClick={() => expiry && onApply({ op: "set-expiry", signer: signerRef, expiry })}
+          onClick={() => expiry && apply({ op: "set-expiry", signer: signerRef, expiry })}
           title="Change the expiry of a registered signer"
         >
           Set expiry
         </button>
-        <button className="ghost danger" disabled={busy || !registered} onClick={() => onApply({ op: "revoke", signer: signerRef })}>
+        <button className="ghost danger" disabled={busy || !registered} onClick={() => apply({ op: "revoke", signer: signerRef })}>
           Revoke signer
         </button>
       </div>

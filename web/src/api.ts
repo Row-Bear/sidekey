@@ -1,4 +1,4 @@
-import type { CallRequest, FunctionInfo, PreviewResult, RuleView, SignerView, StepResult } from "@poc/core";
+import type { CallRequest, FunctionInfo, PreviewResult, RuleView, SignatureResponse, SignerView, StepResult } from "@poc/core";
 import type { DemoState, RunRequest } from "./api-types";
 
 export async function fetchState(): Promise<DemoState> {
@@ -33,6 +33,23 @@ export const requestPreview = (call: CallRequest) =>
     headers: { "content-type": "application/json" },
     body: JSON.stringify(call),
   });
+
+/** Sends the browser's signature for a pending request; throws the server's message if it is refused. */
+export async function submitSignature(id: string, response: SignatureResponse): Promise<void> {
+  await getJson("/api/signature", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, response }),
+  });
+}
+
+export async function cancelSignature(id: string, reason?: string): Promise<void> {
+  await getJson("/api/signature", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, cancel: true, reason }),
+  });
+}
 
 export const looksLikeContractId = (text: string) => /^C[A-Z2-7]{55}$/.test(text.trim());
 

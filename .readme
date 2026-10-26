@@ -92,7 +92,8 @@ lists every variable.
 | `npm run web` | Dashboard with live balances, policy, timeline and a **Run full demo** button |
 | `npm run export:run` | Writes `docs/recorded-run.md` from `demo-run.json` |
 | `npm run typecheck` | Typechecks the Node code and the web app |
-| `npm run test:contract` / `npm run test:web` | Contract unit tests / API request-guard tests |
+| `npm run test:contract` / `npm run test:core` / `npm run test:web` | Contract, core and API-guard tests |
+| `npm run e2e:broker` | End-to-end signature broker check over HTTP (needs `npm run web` running and a funded account) |
 
 `--fresh` and **Run full demo** replace `MASTER_*` and `SMART_ACCOUNT_ID` in
 `.env`; the previous master secret is not kept, so funds left on an older smart
@@ -126,6 +127,7 @@ account become unreachable. A full run takes about a minute.
 contracts/smart-account/   Soroban smart account + unit tests
 packages/core/             shared TypeScript: chain helpers, scenario, fresh-account setup
 scripts/                   01 setup accounts, 02 deploy, 03 run PoC, 04 export recorded run
+spikes/                    verification spikes (wallet signing, passkey verification, broker e2e)
 web/                       Vite + React dashboard; web/server/api.ts runs the demo server-side
 docs/recorded-run.md       recorded testnet run
 PLAN.md                    development plan and status

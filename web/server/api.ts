@@ -5,6 +5,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import {
+  type Authorizer,
+  brokerAuthorizer,
+  brokerSigner,
   type CallRequest,
   clearCallHistory,
   clearResults,
@@ -26,6 +29,9 @@ import {
   runStep,
   saveCallRecord,
   saveResult,
+  SignatureBroker,
+  type SignatureResponse,
+  type SigningSource,
   snapshot,
   STEPS,
 } from "../../packages/core/src/index.ts";
@@ -95,16 +101,32 @@ function parsePolicyOp(body: unknown): PolicyOp {
   throw new Error("Invalid policy edit");
 }
 
+/** Whether signatures come from the browser (wallet, passkey, pasted) instead of the demo's own keys. */
+const parseVia = (value: unknown): { via?: "browser" } => (value === "browser" ? { via: "browser" } : {});
+
+type SignatureBody = { id: string; response: SignatureResponse } | { id: string; cancel: true; reason?: string };
+
+function parseSignatureBody(body: unknown): SignatureBody {
+  const b = (body ?? {}) as Record<string, unknown>;
+  if (!isText(b.id)) throw new Error("Invalid signature answer: id is required");
+  if (b.cancel === true) return { id: b.id, cancel: true, ...(isText(b.reason) ? { reason: b.reason } : {}) };
+  const r = (b.response ?? {}) as Record<string, unknown>;
+  if ((r.kind === "payload" || r.kind === "message") && isText(r.signature)) {
+    return { id: b.id, response: { kind: r.kind, signature: r.signature } };
+  }
+  throw new Error('Invalid signature answer: expected response {kind: "payload" | "message", signature} or cancel: true');
+}
+
 function parseRunRequest(body: unknown): RunRequest {
-  const b = body as Partial<RunRequest> & { from?: unknown; to?: unknown; call?: unknown; policy?: unknown };
+  const b = body as Partial<RunRequest> & { from?: unknown; to?: unknown; call?: unknown; policy?: unknown; via?: unknown };
   if (b.action === "full" || b.action === "fresh") return { action: b.action };
-  if (b.action === "call") return { action: "call", call: parseCallRequest(b.call) };
-  if (b.action === "policy") return { action: "policy", policy: parsePolicyOp(b.policy) };
+  if (b.action === "call") return { action: "call", call: parseCallRequest(b.call), ...parseVia(b.via) };
+  if (b.action === "policy") return { action: "policy", policy: parsePolicyOp(b.policy), ...parseVia(b.via) };
   if (b.action === "steps") {
     const from = Number(b.from);
     const to = Number(b.to);
     const valid = (n: number) => Number.isInteger(n) && n >= 1 && n <= STEPS.length;
-    if (valid(from) && valid(to) && from <= to) return { action: "steps", from, to };
+    if (valid(from) && valid(to) && from <= to) return { action: "steps", from, to, ...parseVia(b.via) };
   }
   throw new Error(`Invalid run request; expected action "full", "fresh", "steps" (from/to in 1-${STEPS.length}), "call" or "policy"`);
 }
@@ -112,6 +134,7 @@ function parseRunRequest(body: unknown): RunRequest {
 export function demoApi(repoRoot: string): Plugin {
   const resultsPath = join(repoRoot, "demo-run.json");
   const historyPath = join(repoRoot, "demo-calls.json");
+  const broker = new SignatureBroker();
   const envPath = join(repoRoot, ".env");
 
   // `.env` is the source of truth: the CLI (`npm run poc -- --fresh`) can replace the master and
@@ -147,6 +170,7 @@ export function demoApi(repoRoot: string): Plugin {
       })),
       results: loadResults(resultsPath),
       calls: loadCallHistory(historyPath),
+      pendingSignatures: broker.pending(),
       run: { ...run, log: [...run.log] },
       updatedAt: new Date().toISOString(),
     };
@@ -165,10 +189,15 @@ export function demoApi(repoRoot: string): Plugin {
     try {
       if (request.action === "call" || request.action === "policy") {
         const ctx = currentContext();
+        const signing: SigningSource | undefined = request.via === "browser"
+          ? (signer): Authorizer[] => [brokerAuthorizer(broker, { account: ctx.smartAccountId, signerRaw: signer.raw, signerLabel: signer.label })]
+          : undefined;
         run.label = request.action === "call"
           ? `Sending ${request.call.function}() as ${request.call.signer === "master" ? "master" : "a delegate"}`
           : "Applying a policy edit as the master";
-        const record = request.action === "call" ? await runCall(ctx, request.call) : await runPolicyOp(ctx, request.policy);
+        const record = request.action === "call"
+          ? await runCall(ctx, request.call, signing)
+          : await runPolicyOp(ctx, request.policy, signing);
         saveCallRecord(historyPath, record);
         log(`${record.title}: ${record.outcome}${record.error ? ` (${record.error})` : ""}`);
         return;
@@ -185,6 +214,14 @@ export function demoApi(repoRoot: string): Plugin {
       // "full" is the core demo (steps 1-7); the optional expiry steps run on request.
       const to = request.action === "steps" ? request.to : CORE_STEP_COUNT;
       const ctx = currentContext();
+      if (request.action === "steps" && request.via === "browser") {
+        const asBrowser = (label: "master" | "delegate", raw: Uint8Array) =>
+          brokerSigner(broker, { account: ctx.smartAccountId, signerRaw: raw, signerLabel: label });
+        ctx.remoteSigners = {
+          master: asBrowser("master", ctx.master.rawPublicKey()),
+          delegate: asBrowser("delegate", ctx.delegate.rawPublicKey()),
+        };
+      }
       for (let step = from; step <= to; step++) {
         run.currentStep = step;
         run.label = `Step ${step}/${STEPS.length}: ${STEPS[step - 1].name}`;
@@ -230,6 +267,18 @@ export function demoApi(repoRoot: string): Plugin {
           if (req.method === "GET" && path === "/contract-functions") {
             const id = new URL(req.url ?? "", "http://localhost").searchParams.get("id") ?? "";
             return json(res, 200, { contract: id, functions: await contractFunctions(currentContext(), id) });
+          }
+
+          if (req.method === "POST" && path === "/signature") {
+            const answer = parseSignatureBody(await readBody(req));
+            if ("cancel" in answer) {
+              return broker.cancel(answer.id, answer.reason)
+                ? json(res, 200, { cancelled: true })
+                : json(res, 404, { error: "No such signing request" });
+            }
+            const result = broker.submit(answer.id, answer.response);
+            if (result.ok) return json(res, 200, { accepted: true });
+            return json(res, result.reason === "unknown" ? 404 : 422, { error: result.message });
           }
 
           if (req.method === "POST" && path === "/preview") {

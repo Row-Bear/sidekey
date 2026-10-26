@@ -16,6 +16,7 @@ import { CallBuilder } from "./CallBuilder";
 import { CallHistory } from "./CallHistory";
 import { useSigners } from "./hooks";
 import { PolicyEditor } from "./PolicyEditor";
+import { SigningModal } from "./SigningModal";
 
 const STATUS_LABEL: Record<StepStatus, string> = {
   pending: "Not run",
@@ -232,7 +233,7 @@ export default function App() {
 
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), busy ? 2000 : 6000);
+    const timer = setInterval(() => void refresh(), busy ? 1000 : 6000);
     return () => clearInterval(timer);
   }, [refresh, busy]);
 
@@ -329,10 +330,11 @@ export default function App() {
             </section>
           )}
 
+          {state.pendingSignatures[0] && <SigningModal request={state.pendingSignatures[0]} onDone={() => void refresh()} />}
           {signersError && <p className="error banner">{signersError}</p>}
           <div className="grid2">
-            <PolicyEditor data={signersData} busy={busy} onApply={(policy) => void start({ action: "policy", policy })} />
-            <CallBuilder data={signersData} busy={busy} version={signersVersion} onSend={(call) => void start({ action: "call", call })} />
+            <PolicyEditor data={signersData} busy={busy} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
+            <CallBuilder data={signersData} busy={busy} version={signersVersion} onSend={(call, via) => void start({ action: "call", call, via })} />
           </div>
           <CallHistory calls={state.calls} />
 

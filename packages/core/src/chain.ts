@@ -148,7 +148,7 @@ function contractCallFunction(params: Pick<InvokeParams, "contractId" | "method"
   return body.invokeHostFunctionOp.hostFunction;
 }
 
-function flattenInvocation(node: xdr.SorobanAuthorizedInvocation, into: CallContext[]): void {
+export function flattenInvocation(node: xdr.SorobanAuthorizedInvocation, into: CallContext[]): void {
   const fn = node.function;
   if (fn.type === "sorobanAuthorizedFunctionTypeContractFn") {
     into.push({
