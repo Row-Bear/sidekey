@@ -3,9 +3,9 @@
 > Your hardware wallet keeps control. Sidekeys handle routine calls.
 
 Hardware wallets protect your funds, but can make even routine, low-risk
-transactions cumbersome. Sidekey is designed to keep your hardware wallet in
+transactions cumbersome. Sidekey keeps your hardware wallet in
 control while adding "sidekeys" for routine actions. A Stellar `G...` address
-remains the unrestricted master signer, while sidekeys can be limited to
+remains the unrestricted master signer, while sidekeys are limited to
 specific functions on specific contracts. The smart account checks those
 rules on-chain and rejects calls outside them.
 
