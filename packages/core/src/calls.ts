@@ -17,6 +17,7 @@ import {
   signerIdScVal,
   type SignerPolicyView,
 } from "./policy.js";
+import { SigningCancelled } from "./broker.js";
 import { delegateKey, latestLedger, LEDGERS_PER_MINUTE, type ScenarioContext } from "./scenario.js";
 import { argKind, describeFunctions, encodeArg, encodeArgs, loadSpec } from "./spec.js";
 
@@ -226,6 +227,12 @@ function failure(base: Pick<CallRecord, "kind" | "title" | "signer">, message: s
   return toRecord(base, { ok: false, stage: stage as "simulation", error: message });
 }
 
+/** A failure from a thrown error; declining to sign (or a signing timeout) is marked as cancelled. */
+function failureFrom(base: Pick<CallRecord, "kind" | "title" | "signer">, err: unknown, stage: string): CallRecord {
+  const record = failure(base, err instanceof Error ? err.message : String(err), stage);
+  return err instanceof SigningCancelled ? { ...record, cancelled: true } : record;
+}
+
 /** Sends a call signed by the chosen signer (only signers whose key this demo holds). */
 export async function runCall(ctx: ScenarioContext, req: CallRequest, signing?: SigningSource): Promise<CallRecord> {
   const signer = parseSigner(req.signer);
@@ -253,14 +260,14 @@ export async function runCall(ctx: ScenarioContext, req: CallRequest, signing?: 
   try {
     params = await prepareCall(ctx, req);
   } catch (err) {
-    return failure(base, err instanceof Error ? err.message : String(err), "input");
+    return failureFrom(base, err, "input");
   }
   try {
     const authorizers = asked ?? authorizersFor(ctx, signer.id, key!);
     const result = await invoke(ctx, { ...params, authorizers });
     return toRecord(base, result.ok ? result : { ...result, error: await explainFailure(ctx, result.error, result.detail) });
   } catch (err) {
-    return failure(base, err instanceof Error ? err.message : String(err), "signing");
+    return failureFrom(base, err, "signing");
   }
 }
 
@@ -416,7 +423,7 @@ export async function runPolicyOp(ctx: ScenarioContext, op: PolicyOp, signing?: 
     }
     return toRecord(base, await invoke(ctx, { contractId: ctx.smartAccountId, method, args, authorizers: authorizers ?? authorizersFor(ctx, "master", ctx.master) }));
   } catch (err) {
-    return failure({ ...base, title: base.title || `Policy edit (${op.op})` }, err instanceof Error ? err.message : String(err), "input");
+    return failureFrom({ ...base, title: base.title || `Policy edit (${op.op})` }, err, "input");
   }
 }
 

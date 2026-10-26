@@ -14,6 +14,8 @@ export interface CallRecord {
   explorerUrl?: string;
   /** Set when the account's own policy refused the call (NotAllowed, SignerExpired, UnknownSigner). */
   rejectedByPolicy?: boolean;
+  /** The user declined to sign, or the request timed out: not a failure of the call itself. */
+  cancelled?: boolean;
   failureStage?: string;
   error?: string;
 }

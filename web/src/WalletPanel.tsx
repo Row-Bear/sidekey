@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DemoState, RunRequest } from "./api-types";
 import { accountUrl, fetchRecordedAccounts, fetchWalletStatus, formatXlm, loadWalletAccount, setMasterMode, shortAddress, type WalletStatus } from "./api";
+import { CopyButton } from "./CopyButton";
 import { Spinner } from "./Spinner";
 import type { useWallet } from "./wallet";
 
@@ -148,6 +149,7 @@ export function WalletPanel({ embedded = false, demo = true, wallet, state, busy
             <a href={accountUrl(connection.address)} target="_blank" rel="noreferrer" title={connection.address}>
               {shortAddress(connection.address)}
             </a>
+            <CopyButton text={connection.address} label="wallet address" />
             <NetworkChip network={connection.network} />
             {status?.exists === true && <span className="muted small">{formatXlm(status.stroops)} XLM</span>}
             {status?.exists === false && <span className="muted small">not on testnet yet</span>}
@@ -179,9 +181,12 @@ export function WalletPanel({ embedded = false, demo = true, wallet, state, busy
                 <option value={OTHER}>Another account (paste a contract id)…</option>
               </select>
               {currentId && (
-                <a href={accountUrl(currentId)} target="_blank" rel="noreferrer" className="small" title={currentId}>
-                  view active
-                </a>
+                <>
+                  <a href={accountUrl(currentId)} target="_blank" rel="noreferrer" className="small" title={currentId}>
+                    view active
+                  </a>
+                  <CopyButton text={currentId} label="smart account id" />
+                </>
               )}
               <button
                 className="ghost"

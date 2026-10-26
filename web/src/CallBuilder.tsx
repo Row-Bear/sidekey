@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CallRequest, FunctionInfo, PreviewResult, SignerView } from "@poc/core";
-import { expiryText, requestPreview, shortAddress, type SignersResponse } from "./api";
+import { expiryText, friendlyError, requestPreview, shortAddress, type SignersResponse } from "./api";
 import { ArgInput } from "./ArgInput";
 import type { SigningVia } from "./api-types";
 import { useDebounced } from "./hooks";
@@ -27,12 +27,20 @@ function PreviewBox({ preview }: { preview: PreviewResult | "loading" | null }) 
     allowed: "✓ Allowed by the signer's policy",
     rejected: "✗ Would be rejected by the policy",
     "simulation-failed": "The call itself would fail",
-    invalid: "Check the inputs",
+    invalid: "Fill in the call",
   }[preview.status];
+  // Incomplete inputs are not an error yet, so they get the quiet style; raw host errors are kept under Details.
+  const friendly = preview.status === "simulation-failed" ? friendlyError(preview.message) : { summary: preview.message };
   return (
-    <div className={`verdict ${preview.status}`}>
+    <div className={`verdict ${preview.status === "invalid" ? "muted" : preview.status}`}>
       <strong>{heading}</strong>
-      <div>{preview.message}</div>
+      <div>{friendly.summary}</div>
+      {friendly.detail && (
+        <details>
+          <summary>Details</summary>
+          <code className="raw-error">{friendly.detail}</code>
+        </details>
+      )}
       {tree.length > 0 && (
         <details>
           <summary>Calls the account must authorize ({tree.length})</summary>
@@ -43,9 +51,11 @@ function PreviewBox({ preview }: { preview: PreviewResult | "loading" | null }) 
   );
 }
 
-export function CallBuilder({ demo = true, data, busy, version, contract, onContractChange, functions, loading, nameOf, onSend }: {
+export function CallBuilder({ demo = true, walletReady = true, data, busy, version, contract, onContractChange, functions, loading, nameOf, onSend }: {
   /** The guided demo can sign with the keys it holds; the plain page always signs in the browser (wallet, passkey or pasted). */
   demo?: boolean;
+  /** Whether the master can sign now (the wallet that owns the account is connected). The delegate's passkey needs no wallet. */
+  walletReady?: boolean;
   data: SignersResponse | null;
   busy: boolean;
   /** Bumps when on-chain state may have changed, so the preview refreshes. */
@@ -115,7 +125,8 @@ export function CallBuilder({ demo = true, data, busy, version, contract, onCont
 
   const rejected = preview !== null && preview !== "loading" && preview.status === "rejected";
   // With demo keys only signers the demo holds a key for can send; in the browser anyone can be asked.
-  const canSend = !busy && request !== null && (via === "browser" || signer?.hasKey === true || signer?.viaBrowser === true);
+  const masterBlocked = !demo && !walletReady && signerId === "master";
+  const canSend = !busy && request !== null && !masterBlocked && (via === "browser" || signer?.hasKey === true || signer?.viaBrowser === true);
 
   return (
     <section className="card">
@@ -137,7 +148,14 @@ export function CallBuilder({ demo = true, data, busy, version, contract, onCont
         <span className="field-label">Signer</span>
         <select value={signerId} onChange={(e) => setSignerId(e.target.value)} disabled={!data}>
           {data?.signers.map((s) => (
-            <option key={s.id} value={s.id} disabled={!s.hasKey && !s.viaBrowser && via !== "browser"}>{signerOptionLabel(s, data.latestLedger, demo)}</option>
+            <option
+              key={s.id}
+              value={s.id}
+              disabled={(!s.hasKey && !s.viaBrowser && via !== "browser") || (!demo && !walletReady && s.id === "master")}
+            >
+              {signerOptionLabel(s, data.latestLedger, demo)}
+              {!demo && !walletReady && s.id === "master" ? " (connect your wallet)" : ""}
+            </option>
           ))}
         </select>
       </label>

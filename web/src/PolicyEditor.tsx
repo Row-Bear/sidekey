@@ -118,6 +118,8 @@ export function PolicyEditor({ demo = true, data, busy, contract, functions, loa
                 <button
                   className="ghost small-btn"
                   disabled={busy}
+                  aria-label={`Remove the rule ${describeRule(rule)}`}
+                  title={`Remove the rule ${describeRule(rule)}`}
                   onClick={() => apply({ op: "remove-rule", signer: signerRef, contract: rule.contract, function: rule.function })}
                 >
                   Remove

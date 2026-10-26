@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CopyButton } from "./CopyButton";
 import { shortAddress } from "./api";
 import { type AddressBook, MAX_LABEL_LENGTH } from "./addressBook";
 
@@ -37,15 +38,21 @@ export function ContractPicker({ value, onChange, book, error }: { value: string
   };
 
   return (
-    <div className="field contract-picker">
-      <select value={selected} onChange={(e) => choose(e.target.value)} aria-label="Contract">
-        {book.entries.map((e) => (
-          <option key={e.id} value={e.id}>
-            {e.label} · {shortAddress(e.id)}
-          </option>
-        ))}
-        <option value={OTHER}>Another contract (paste an id)…</option>
-      </select>
+    <div className="contract-picker">
+      <div className="contract-row">
+        <span className="field-label" title="The policy editor and the call builder below both work on this contract">
+          Contract
+        </span>
+        <select value={selected} onChange={(e) => choose(e.target.value)} aria-label="Contract">
+          {book.entries.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.label} · {shortAddress(e.id)}
+            </option>
+          ))}
+          <option value={OTHER}>Another contract (paste an id)…</option>
+        </select>
+        <CopyButton text={/^C[A-Z2-7]{55}$/.test(id) ? id : ""} label="contract id" />
+      </div>
 
       {entry && !other && (
         <div className="actions">

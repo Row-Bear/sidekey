@@ -125,6 +125,22 @@ export type StepStatus = "pending" | "running" | "succeeded" | "blocked" | "unex
 const SECONDS_PER_LEDGER = 5;
 
 /** e.g. "expires in about 12 min (ledger 5,389,030)". */
+/** A plain-language version of a contract or host error, with the original kept for anyone who wants it. */
+export function friendlyError(raw: string): { summary: string; detail?: string } {
+  if (/Storage, MissingValue/.test(raw)) {
+    return {
+      summary: "The contract could not run this call: it reads data that does not exist yet, for example for an account with no position there.",
+      detail: raw,
+    };
+  }
+  const contractError = /Error\(Contract, #(\d+)\)/.exec(raw);
+  if (contractError) {
+    return { summary: `The contract refused the call (its error #${contractError[1]}).`, detail: raw };
+  }
+  if (/^HostError:/.test(raw) || raw.length > 160) return { summary: "The call could not be run.", detail: raw };
+  return { summary: raw };
+}
+
 /** A rough duration: seconds, minutes, hours or days, whichever reads best. */
 export function durationText(seconds: number): string {
   const minutes = seconds / 60;

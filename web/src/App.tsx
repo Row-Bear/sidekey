@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { RuleView, StepResult } from "@poc/core";
+import type { CallRecord, RuleView, StepResult } from "@poc/core";
 import type { DemoState, StepMeta } from "./api-types";
 import {
   accountUrl,
@@ -18,6 +18,7 @@ import { CallBuilder } from "./CallBuilder";
 import { CallHistory } from "./CallHistory";
 import { useAddressBook } from "./addressBook";
 import { ContractPicker } from "./ContractPicker";
+import { Toast } from "./Toast";
 import { useContractFunctions, useSigners } from "./hooks";
 import { PasskeyPanel } from "./PasskeyPanel";
 import { passkeySigner } from "./passkey";
@@ -126,14 +127,14 @@ function Policy({ state, demo, nameOf }: { state: DemoState; demo: boolean; name
         <tbody>
           <tr>
             <td>
-              <span className="badge master">master</span> <AddressLink address={state.accounts.master} />
+              <span className="badge master" title="The master can authorize anything">master</span> <AddressLink address={state.accounts.master} />
             </td>
             <td>Any call (default signer, never expires)</td>
           </tr>
           {showDelegate && (
           <tr>
             <td>
-              <span className="badge delegate">delegate</span> <AddressLink address={state.accounts.delegate} />
+              <span className="badge delegate" title="A delegate can only do what its rules allow">delegate</span> <AddressLink address={state.accounts.delegate} />
             </td>
             <td>
               {policy === null ? (
@@ -243,6 +244,23 @@ export default function App({ variant }: { variant: Variant }) {
   const busy = state?.run.busy ?? false;
   // The plain page has nothing to act on until a wallet's smart account is active.
   const ready = state?.mode === "wallet";
+
+  // The outcome of each finished call or policy edit appears as a toast, so it is seen where the action was taken.
+  const [toast, setToast] = useState<CallRecord | null>(null);
+  const lastCallId = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!state) return;
+    const latest = state.calls[0] ?? null;
+    if (lastCallId.current === undefined) {
+      lastCallId.current = latest?.id ?? null; // what is already there on load is not news
+      return;
+    }
+    if ((latest?.id ?? null) !== lastCallId.current) {
+      lastCallId.current = latest?.id ?? null;
+      setToast(latest);
+    }
+  }, [state]);
+  const dismissToast = useCallback(() => setToast(null), []);
   // Which header button started the current run, so only that one shows it is working (set at the click,
   // before the server reports busy).
   const [started, setStarted] = useState<string | null>(null);
@@ -270,6 +288,9 @@ export default function App({ variant }: { variant: Variant }) {
   }, [signersData]);
   const contractFunctions = useContractFunctions(contract);
   const wallet = useWallet();
+  // Policy edits and master calls need the wallet that owns the account; the guided demo can use its own keys.
+  const walletOwns = state?.mode === "wallet" && wallet.connection !== null && state.wallet?.address === wallet.connection.address;
+  const canEdit = demo || walletOwns;
   const passkey = state?.passkey ?? null;
   const signers = useMemo(() => [...wallet.signers, ...(passkey ? [passkeySigner(passkey)] : [])], [wallet.signers, passkey]);
 
@@ -413,14 +434,28 @@ export default function App({ variant }: { variant: Variant }) {
           </div>
 
           {signersError && <p className="error banner">{signersError}</p>}
-          <section className="card">
-            <h2>Contract</h2>
-            <p className="muted small">The policy editor and the call builder below both work on this contract.</p>
+          <section className="card contract-card">
             <ContractPicker value={contract} onChange={setContract} book={book} error={contractFunctions.error} />
           </section>
           <div className="grid2">
-            <PolicyEditor demo={demo} data={signersData} busy={busy} contract={contract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
-            <CallBuilder demo={demo} data={signersData} busy={busy} version={signersVersion} contract={contract} onContractChange={setContract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onSend={(call, via) => void start({ action: "call", call, via })} />
+            {canEdit ? (
+              <PolicyEditor demo={demo} data={signersData} busy={busy} contract={contract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
+            ) : (
+              <section className="card">
+                <h2>Policy editor</h2>
+                <p className="muted small">
+                  {wallet.connection
+                    ? `This smart account belongs to ${state.wallet ? shortAddress(state.wallet.address) : "another wallet"}. Connect that wallet to edit its policy.`
+                    : "Connect the wallet that owns this smart account to edit its policy."}
+                </p>
+                {!wallet.connection && (
+                  <button disabled={wallet.connecting} onClick={() => void wallet.connect()}>
+                    {wallet.connecting ? "Connecting…" : "Connect wallet"}
+                  </button>
+                )}
+              </section>
+            )}
+            <CallBuilder demo={demo} walletReady={walletOwns} data={signersData} busy={busy} version={signersVersion} contract={contract} onContractChange={setContract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onSend={(call, via) => void start({ action: "call", call, via })} />
           </div>
             </>
           )}
@@ -478,12 +513,19 @@ export default function App({ variant }: { variant: Variant }) {
           {state.pendingSignatures[0] && <SigningModal request={state.pendingSignatures[0]} signers={signers} onDone={() => void refresh()} />}
           {(demo || ready) && <CallHistory calls={state.calls} />}
 
-          {state.run.log.length > 0 && (
-            <section className="card">
-              <h2>Run log</h2>
-              <pre className="log">{state.run.log.join("\n")}</pre>
-            </section>
-          )}
+          {state.run.log.length > 0 &&
+            (demo ? (
+              <section className="card">
+                <h2>Run log</h2>
+                <pre className="log">{state.run.log.join("\n")}</pre>
+              </section>
+            ) : (
+              <details className="card log-card">
+                <summary>Run log ({state.run.log.length} lines)</summary>
+                <pre className="log">{state.run.log.join("\n")}</pre>
+              </details>
+            ))}
+          {toast && <Toast record={toast} onDismiss={dismissToast} />}
         </>
       )}
     </main>
