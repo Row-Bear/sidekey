@@ -157,7 +157,7 @@ The delegate can be a **passkey** (WebAuthn) instead of the demo's key. In the *
    (`secp256r1`), and the same policy and expiry rules apply: `claim()` works, `withdraw()` is refused with
    `NotAllowed (#3)`, and after expiry the passkey is refused with `SignerExpired (#5)`.
 
-Tested with a Chrome virtual authenticator; not yet with a real device. Switch back with **Demo key**. The CLI
+Tested with a Chrome virtual authenticator, a software authenticator (`npm run e2e:passkey`) and a password-manager passkey extension in a real browser; not yet with a hardware key or a platform authenticator. Switch back with **Demo key**. The CLI
 runner (`npm run poc`) always uses the demo's delegate key.
 
 ## Repository layout

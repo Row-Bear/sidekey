@@ -298,9 +298,13 @@ client accepts both common encodings).
     message shown is `Authorize C… payload <hash>`, that each master step is accepted, and that step 2
     shows a transaction prompt. Switch the wallet to mainnet once and check the dashboard refuses.
   - Freighter, if installed: the same, expecting `signAuthEntry` instead of messages.
-  - Passkey on a real device (Touch ID, Windows Hello, a phone or a security key): **Create passkey**,
-    switch the delegate to Passkey, run the full demo, then the expiry demo. If registration fails, note
-    which authenticator; it must support ES256 (P-256).
+  - [x] Passkey from a **password-manager extension** in a real browser: created, full demo and expiry
+    demo as expected (claim succeeded, withdraw refused with `NotAllowed`, expired passkey refused with
+    `SignerExpired`). The extension's own client data and user-verification flag satisfy the contract's
+    strict checks.
+  - [ ] Passkey on a hardware key (YubiKey, needs its FIDO2 PIN), Touch ID or Windows Hello: **Create
+    passkey**, switch the delegate to Passkey, run the full demo, then the expiry demo. If registration
+    fails, note which authenticator; it must support ES256 (P-256).
   - Both together: a wallet master and a passkey delegate in one run.
 
 ## Suggested cut line
