@@ -19,6 +19,7 @@
     "e2e:wallet": "tsx spikes/broker/wallet-mode.ts",
     "e2e:passkey": "tsx spikes/broker/passkey-mode.ts",
     "e2e:lessthan": "tsx spikes/less-than/run.ts",
+    "e2e:factory": "tsx spikes/factory/run.ts",
     "deploy:account": "tsx scripts/02-deploy-smart-account.ts",
     "poc": "tsx scripts/03-run-poc.ts",
     "export:run": "tsx scripts/04-export-run.ts"
@@ -28,6 +29,7 @@
     "dotenv": "^18.0.9"
   },
   "devDependencies": {
+    "@openzeppelin/relayer-plugin-channels": "^0.21.0",
     "@types/node": "^24.0.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"

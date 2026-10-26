@@ -465,3 +465,29 @@ Node code in `packages/core`: `deploy.ts` calls the Stellar CLI, `session.ts`, `
 version needs that API on a server (with CORS, rate limits and the sponsor key kept there) or the
 parts ported to the browser. Mobile wallets are also needed for the master (extensions do not run
 on phones); passkeys work, registered per domain.
+
+## Spike: factory contract + OpenZeppelin Channels (testnet)
+
+Goal: create and use a smart account with no server and no fee payer of our own.
+
+- `contracts/factory`: `create(master, index)` deploys a smart account for the G address (the master
+  must authorize it, so nobody can create one for someone else), `account_address(master, index)`
+  gives the address before or after (salt = sha256(master XDR || index)), and an admin can point new
+  accounts at a newer WASM (`set_wasm_hash`). Three unit tests (`cargo test -p factory`).
+- Deployed to testnet with the smart-account WASM version 3. `FACTORY_ID`, `ACCOUNT_WASM_HASH` and
+  `CHANNELS_API_KEY` are in `.env` (the key comes from `GET https://channels.openzeppelin.com/testnet/gen`).
+- `ChainContext.relay` (core): when set, `invoke` signs the auth entries as before but submits
+  `{func, auth}` through the relayer instead of signing and paying as the sponsor.
+- `npm run e2e:factory` (`spikes/factory/run.ts`) passes: a new key calls `create` through Channels;
+  the account appears at the predicted address with that key as master; a master-signed policy
+  change on it also goes through Channels. Fees were paid by the service's accounts, not ours.
+
+Findings:
+- The master G account must already exist on chain. An unfunded key fails in `require_auth`
+  ("non-existing value for account"). Real wallets have funded accounts; on testnet friendbot does it.
+- The Channels testnet API key is issued on a plain GET, so a key shipped in a static page is public:
+  fair-use limits (fees per key per 24 h) are the only protection. A small proxy would hide it.
+- The `invoke` pipeline still needs one existing account as the simulation source (the sponsor today);
+  a browser build would use any well-known funded account.
+- Next: move the Node-only parts of `packages/core` (crypto, files) to browser equivalents, then a
+  static plain page; the demo page stays dev-only.

@@ -23,9 +23,14 @@ export type Authorizer =
   // auth-entry preimage XDR and its 32-byte hash, and returns the account's signature ScVal.
   | { kind: "smart-remote"; address: string; sign: (preimageXdr: string, payload: Uint8Array) => Promise<xdr.ScVal> };
 
+/** Submits a signed host function through a relayer that builds the transaction and pays its fee. */
+export type Relay = (func: xdr.HostFunction, auth: xdr.SorobanAuthorizationEntry[]) => Promise<{ hash: string }>;
+
 export interface ChainContext {
   server: rpc.Server;
   sponsor: Keypair;
+  /** When set, calls are submitted through it instead of being signed and paid for by the sponsor. */
+  relay?: Relay;
 }
 
 export interface InvokeParams {
@@ -217,9 +222,27 @@ export async function invoke(ctx: ChainContext, params: InvokeParams): Promise<I
     };
   }
 
+  if (ctx.relay) {
+    try {
+      const { hash } = await ctx.relay(hostFunction, signed);
+      return confirmed(server, hash);
+    } catch (error) {
+      return { ok: false, stage: "submission", error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   const prepared = rpc.assembleTransaction(withAuth, enforcing).build();
   prepared.sign(sponsor);
   return submitAndWait(server, prepared);
+}
+
+/** The outcome of a transaction a relayer submitted. */
+async function confirmed(server: rpc.Server, hash: string): Promise<InvokeResult> {
+  const final = await waitForTransaction(server, hash);
+  if (final.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+    return { ok: false, stage: "submission", error: `transaction ${hash} ended with status ${final.status}` };
+  }
+  return { ok: true, hash, returnValue: final.returnValue === undefined ? undefined : scValToNative(final.returnValue) };
 }
 
 export async function submitAndWait(server: rpc.Server, tx: Transaction): Promise<InvokeResult> {
