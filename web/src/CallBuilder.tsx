@@ -5,6 +5,7 @@ import { ArgInput } from "./ArgInput";
 import type { SigningVia } from "./api-types";
 import { useDebounced } from "./hooks";
 import { SignWith } from "./SignWith";
+import { delegatesFirst } from "./signers";
 
 function signerOptionLabel(signer: SignerView, latestLedger: number, demo: boolean): string {
   if (signer.label === "master") return `master ${shortAddress(signer.address)}: may authorize anything`;
@@ -92,6 +93,8 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   }, [fn?.name, contract]);
 
   const signer = data?.signers.find((s) => s.id === signerId) ?? null;
+  // The master, then the delegate and the other signers, most relevant first.
+  const orderedSigners = data ? [...data.signers.filter((s) => s.label === "master"), ...delegatesFirst(data.signers, data.latestLedger)] : [];
   const request: CallRequest | null = fn && signerId ? { contract: contract.trim(), function: fn.name, args, signer: signerId } : null;
   const requestKey = useDebounced(JSON.stringify(request), 700);
 
@@ -145,15 +148,15 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
       </div>
 
       <label className="field">
-        <span className="field-label">Signer</span>
+        <span className="field-label">Call as</span>
         <select value={signerId} onChange={(e) => setSignerId(e.target.value)} disabled={!data}>
-          {data?.signers.map((s) => (
+          {orderedSigners.map((s) => (
             <option
               key={s.id}
               value={s.id}
               disabled={(!s.hasKey && !s.viaBrowser && via !== "browser") || (!demo && !walletReady && s.id === "master")}
             >
-              {signerOptionLabel(s, data.latestLedger, demo)}
+              {signerOptionLabel(s, data?.latestLedger ?? 0, demo)}
               {!demo && !walletReady && s.id === "master" ? " (connect your wallet)" : ""}
             </option>
           ))}

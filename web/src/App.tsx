@@ -23,6 +23,7 @@ import { useContractFunctions, useSigners } from "./hooks";
 import { PasskeyPanel } from "./PasskeyPanel";
 import { passkeySigner } from "./passkey";
 import { PolicyEditor } from "./PolicyEditor";
+import { PolicyTable } from "./PolicyTable";
 import { SigningModal } from "./SigningModal";
 import { Spinner } from "./Spinner";
 import { useWallet } from "./wallet";
@@ -429,7 +430,13 @@ export default function App({ variant }: { variant: Variant }) {
                 <Policy state={state} demo={demo} nameOf={book.nameOf} />
               </>
             ) : (
-              <Policy state={state} demo={demo} nameOf={book.nameOf} />
+              <PolicyTable
+                data={signersData}
+                canEdit={canEdit}
+                busy={busy}
+                nameOf={book.nameOf}
+                onApply={(op) => void start({ action: "policy", policy: op, via: "browser" })}
+              />
             )}
           </div>
 
@@ -439,7 +446,7 @@ export default function App({ variant }: { variant: Variant }) {
           </section>
           <div className="grid2">
             {canEdit ? (
-              <PolicyEditor demo={demo} data={signersData} busy={busy} contract={contract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
+              <PolicyEditor demo={demo} compact={!demo} data={signersData} busy={busy} contract={contract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
             ) : (
               <section className="card">
                 <h2>Policy editor</h2>
