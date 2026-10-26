@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import type { DemoState, RunRequest } from "./api-types";
 import { accountUrl, fetchRecordedAccounts, fetchWalletStatus, formatXlm, loadWalletAccount, setMasterMode, shortAddress, type WalletStatus } from "./api";
+import { Spinner } from "./Spinner";
 import type { useWallet } from "./wallet";
 
 type Wallet = ReturnType<typeof useWallet>;
+
+const OTHER = "other";
 
 function NetworkChip({ network }: { network: NonNullable<Wallet["connection"]>["network"] }) {
   if (network.kind === "testnet") return <span className="tag ok">testnet</span>;
@@ -25,7 +28,9 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
   const [status, setStatus] = useState<WalletStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recorded, setRecorded] = useState<string[]>([]);
-  const [accountId, setAccountId] = useState("");
+  // The account chosen in the picker: the active one until the user picks another or "other" to paste an id.
+  const [selected, setSelected] = useState("");
+  const [pasted, setPasted] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -64,12 +69,12 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
     }
   };
 
-  const loadAccount = async (address: string) => {
+  const loadAccount = async (address: string, smartAccountId: string) => {
     setError(null);
     setLoading(true);
     try {
-      await loadWalletAccount(address, accountId.trim());
-      setAccountId("");
+      await loadWalletAccount(address, smartAccountId);
+      setPasted("");
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -79,14 +84,21 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
   };
 
   const owned = connection !== null && state.wallet?.address === connection.address;
-  const currentRecorded = state.wallet !== null && recorded.includes(state.wallet.smartAccountId);
-  // On-chain entries first, then the ones only this dashboard remembers.
+  const currentId = owned && state.wallet ? state.wallet.smartAccountId : "";
+  const currentRecorded = currentId !== "" && recorded.includes(currentId);
+  // The active account, then the other on-chain entries, then the ones only this dashboard remembers.
   const choices = connection
-    ? [
-        ...recorded.map((id) => ({ id, onChain: true })),
-        ...state.knownAccounts.filter((a) => a.address === connection.address && !recorded.includes(a.smartAccountId)).map((a) => ({ id: a.smartAccountId, onChain: false })),
-      ]
+    ? [...new Set([...(currentId ? [currentId] : []), ...recorded, ...state.knownAccounts.filter((a) => a.address === connection.address).map((a) => a.smartAccountId)])].map((id) => ({
+        id,
+        onChain: recorded.includes(id),
+      }))
     : [];
+  const smartAccountToLoad = selected === OTHER ? pasted.trim() : selected;
+  // Creating shows a spinner for as long as the server is deploying.
+  const creating = busy && /^(Deploying|Creating)/.test(state.run.label ?? "");
+
+  // The picker always shows the active account.
+  useEffect(() => setSelected(currentId), [currentId]);
   const wrongWallet = state.mode === "wallet" && state.wallet !== null && connection !== null && state.wallet.address !== connection.address;
   const offTestnet = connection?.network.kind === "other";
 
@@ -140,35 +152,41 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
               The master is {shortAddress(state.wallet!.address)}, not this wallet. Connect that wallet, or create a smart account for this one.
             </p>
           )}
-          {owned && state.wallet && (
-            <p className="muted small">
-              Smart account <a href={accountUrl(state.wallet.smartAccountId)} target="_blank" rel="noreferrer">{shortAddress(state.wallet.smartAccountId)}</a> is owned by this wallet
-              {currentRecorded ? " and recorded on its account." : "; it is not recorded on the wallet's account yet."}
-            </p>
-          )}
 
           <div className="field">
-            <span className="field-label">Load an existing smart account of this wallet</span>
+            <span className="field-label">Smart account of this wallet</span>
             <div className="actions">
-              <input
-                list="known-accounts"
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-                placeholder="Pick one you used before, or paste a contract id (C…)"
-                spellCheck={false}
-                aria-label="Smart account contract id"
-              />
-              <datalist id="known-accounts">
+              <select value={selected} onChange={(e) => setSelected(e.target.value)} disabled={busy || loading} aria-label="Smart account of this wallet">
+                {selected === "" && <option value="">Select an account…</option>}
                 {choices.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {[c.id === state.wallet?.smartAccountId ? "current" : shortAddress(c.id), c.onChain ? "on your account" : "this dashboard"].join(" · ")}
+                    {[
+                      shortAddress(c.id),
+                      c.id === currentId ? "active" : null,
+                      c.onChain ? "on your account" : c.id === currentId ? "not recorded yet" : "this dashboard",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </option>
                 ))}
-              </datalist>
-              <button className="ghost" disabled={busy || loading || offTestnet || accountId.trim() === ""} onClick={() => void loadAccount(connection.address)}>
-                {loading ? "Checking…" : "Load account"}
+                <option value={OTHER}>Another account (paste a contract id)…</option>
+              </select>
+              {currentId && (
+                <a href={accountUrl(currentId)} target="_blank" rel="noreferrer" className="small" title={currentId}>
+                  view active
+                </a>
+              )}
+              <button
+                className="ghost"
+                disabled={busy || loading || offTestnet || smartAccountToLoad === "" || (owned && smartAccountToLoad === currentId)}
+                onClick={() => void loadAccount(connection.address, smartAccountToLoad)}
+              >
+                {loading ? <Spinner label="Checking…" /> : "Load account"}
               </button>
             </div>
+            {selected === OTHER && (
+              <input value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder="Contract id (C…)" spellCheck={false} aria-label="Smart account contract id" />
+            )}
             <span className="muted small">
               The account's master on chain must be this wallet; anything else is refused.{" "}
               {recorded.length > 0 && `${recorded.length} recorded on your account.`}
@@ -182,7 +200,7 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
               </button>
             )}
             <button className={owned ? "ghost" : undefined} disabled={busy || offTestnet} onClick={() => onStart({ action: "wallet-account", address: connection.address })}>
-              {owned ? "New smart account for this wallet" : "Use this wallet as master"}
+              {creating ? <Spinner label="Creating smart account…" /> : owned ? "New smart account for this wallet" : "Use this wallet as master"}
             </button>
             {owned && !currentRecorded && (
               <button

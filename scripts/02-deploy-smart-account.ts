@@ -5,13 +5,13 @@ import { deploySmartAccount, requireEnv, setEnvValues, WASM_RELATIVE_PATH } from
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const ENV_PATH = new URL("../.env", import.meta.url);
 
-function main(): void {
+async function main(): Promise<void> {
   if (process.env.SMART_ACCOUNT_ID && !process.argv.includes("--force")) {
     console.log(`SMART_ACCOUNT_ID already set (${process.env.SMART_ACCOUNT_ID}); pass --force to deploy a new one.`);
     return;
   }
 
-  const { contractId, masterHex } = deploySmartAccount({
+  const { contractId, masterHex } = await deploySmartAccount({
     sponsorSecret: requireEnv("SPONSOR_SECRET"),
     masterPublic: requireEnv("MASTER_PUBLIC"),
     wasmPath: WASM_RELATIVE_PATH,
@@ -23,4 +23,4 @@ function main(): void {
   console.log(`Master signer (ed25519): ${masterHex}`);
 }
 
-main();
+await main();

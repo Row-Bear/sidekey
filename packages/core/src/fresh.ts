@@ -38,7 +38,7 @@ export async function createFreshDemoAccount({ repoRoot, envPath, log = () => {}
   await fundWithFriendbot(master.publicKey());
 
   log("Deploying a new smart account with the new master as its default signer");
-  const { contractId } = deploySmartAccount({
+  const { contractId } = await deploySmartAccount({
     sponsorSecret: requireEnv("SPONSOR_SECRET"),
     masterPublic: master.publicKey(),
     wasmPath,
@@ -88,7 +88,7 @@ export async function createWalletAccount({ repoRoot, sessionPath, masterAddress
   if (!existsSync(wasmPath)) throw new Error(`Contract wasm not found; run "npm run build:contract" first (${wasmPath})`);
 
   log(`Deploying a smart account whose master is the wallet ${masterAddress}`);
-  const { contractId } = deploySmartAccount({ sponsorSecret: requireEnv("SPONSOR_SECRET"), masterPublic: masterAddress, wasmPath, cwd: repoRoot });
+  const { contractId } = await deploySmartAccount({ sponsorSecret: requireEnv("SPONSOR_SECRET"), masterPublic: masterAddress, wasmPath, cwd: repoRoot });
   const wallet = { address: masterAddress, smartAccountId: contractId };
   // Keep whatever else the session holds (such as the passkey delegate).
   const session = loadSession(sessionPath);

@@ -1,5 +1,6 @@
 // Node-only: shells out to the Stellar CLI.
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { StrKey } from "@stellar/stellar-sdk";
 
 export interface DeployParams {
@@ -9,14 +10,17 @@ export interface DeployParams {
   cwd: string;
 }
 
-export function deploySmartAccount({ sponsorSecret, masterPublic, wasmPath, cwd }: DeployParams): {
+const execFileAsync = promisify(execFile);
+
+/** Deploys without blocking the process, so the dashboard keeps answering while it runs (about 5 seconds). */
+export async function deploySmartAccount({ sponsorSecret, masterPublic, wasmPath, cwd }: DeployParams): Promise<{
   contractId: string;
   masterHex: string;
-} {
+}> {
   const masterHex = Buffer.from(StrKey.decodeEd25519PublicKey(masterPublic)).toString("hex");
 
   // The sponsor pays for the deployment; its secret is passed via env, not argv.
-  const output = execFileSync(
+  const { stdout: output } = await execFileAsync(
     "stellar",
     ["contract", "deploy", "--wasm", wasmPath, "--network", "testnet", "--", "--master", masterHex],
     { cwd, env: { ...process.env, STELLAR_ACCOUNT: sponsorSecret }, encoding: "utf8" },

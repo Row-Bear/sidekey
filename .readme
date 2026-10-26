@@ -141,8 +141,9 @@ Switch back with **Demo keys** at any time.
 ### Reusing a smart account
 
 **Run full demo** and **Use this wallet as master** each deploy a new smart account. To go back to an existing one,
-connect the wallet and use **Load an existing smart account of this wallet**: pick one from the list or paste a
-contract id. The dashboard reads the account's `master()` on chain and refuses it unless it is your wallet, so only
+connect the wallet and use the **Smart account of this wallet** dropdown: it shows the active account, lists the
+others (recorded on chain, or remembered by this dashboard), and has an option to paste a contract id; pick one and
+press **Load account**. The dashboard reads the account's `master()` on chain and refuses it unless it is your wallet, so only
 your own accounts load. Then **Run steps 1–7 on this account** (or the per-step buttons) acts on it; step 2 needs
 9,500 XLM in the master, so return the funds first if the account still holds them.
 

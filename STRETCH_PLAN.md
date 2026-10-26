@@ -334,6 +334,12 @@ locally before sending, accepts base64 or hex, and catches the base64 trap with 
   transaction of its own account. Not tried with Freighter. The master was topped up first by merging a funded
   throwaway account into it.
 
+- UI polish: the wallet panel's account picker is a dropdown that shows the active account (plus the others and
+  a "paste a contract id" option); the policy editor and call builder sit above the demo steps; the create
+  buttons show a spinner while an account is being created. Finding: the deploy shelled out synchronously, which
+  froze the dev server for about 5 seconds (no state, no "Deploying…" label), so `deploySmartAccount` is now
+  async and the dashboard stays responsive.
+
 ## Suggested cut line
 
 About 12 hours in total. If time is short, the value order is:

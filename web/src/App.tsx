@@ -19,6 +19,7 @@ import { PasskeyPanel } from "./PasskeyPanel";
 import { passkeySigner } from "./passkey";
 import { PolicyEditor } from "./PolicyEditor";
 import { SigningModal } from "./SigningModal";
+import { Spinner } from "./Spinner";
 import { useWallet } from "./wallet";
 import { WalletPanel } from "./WalletPanel";
 
@@ -216,22 +217,32 @@ export default function App() {
   const [state, setState] = useState<DemoState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  /** Reloads the state; resolves to whether a run is in progress (false when it could not be read). */
+  const refresh = useCallback(async (): Promise<boolean> => {
     try {
-      setState(await fetchState());
+      const next = await fetchState();
+      setState(next);
       setError(null);
+      return next.run.busy;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return false;
     }
   }, []);
 
   const busy = state?.run.busy ?? false;
+  // Which header button started the current run, so only that one shows it is working (set at the click,
+  // before the server reports busy).
+  const [started, setStarted] = useState<string | null>(null);
 
   // On-chain signers and policy change when a job finishes, so reload them then.
   const [signersVersion, setSignersVersion] = useState(0);
   const wasBusy = useRef(false);
   useEffect(() => {
-    if (wasBusy.current && !busy) setSignersVersion((v) => v + 1);
+    if (wasBusy.current && !busy) {
+      setSignersVersion((v) => v + 1);
+      setStarted(null);
+    }
     wasBusy.current = busy;
   }, [busy]);
   const { data: signersData, error: signersError } = useSigners(signersVersion);
@@ -246,10 +257,13 @@ export default function App() {
   }, [refresh, busy]);
 
   const start = async (request: Parameters<typeof startRun>[0]) => {
+    setStarted(request.action);
     try {
       await startRun(request);
-      await refresh();
+      // A run that already finished (or failed at once) must not leave its button spinning.
+      if (!(await refresh())) setStarted(null);
     } catch (err) {
+      setStarted(null);
       setError(err instanceof Error ? err.message : String(err));
     }
   };
@@ -277,10 +291,10 @@ export default function App() {
         </div>
         <div className="controls">
           <button disabled={busy} onClick={() => void start({ action: "full" })}>
-            {busy ? "Running…" : "Run full demo"}
+            {started === "full" ? <Spinner label="Running…" /> : busy ? "Running…" : "Run full demo"}
           </button>
           <button className="ghost" disabled={busy} onClick={() => void start({ action: "fresh" })}>
-            New account only
+            {started === "fresh" ? <Spinner label="Creating…" /> : "New account only"}
           </button>
         </div>
       </header>
@@ -315,6 +329,12 @@ export default function App() {
             <Accounts state={state} />
             <Balances state={state} />
             <Policy state={state} />
+          </div>
+
+          {signersError && <p className="error banner">{signersError}</p>}
+          <div className="grid2">
+            <PolicyEditor data={signersData} busy={busy} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
+            <CallBuilder data={signersData} busy={busy} version={signersVersion} onSend={(call, via) => void start({ action: "call", call, via })} />
           </div>
 
           <section className="card">
@@ -365,11 +385,6 @@ export default function App() {
           )}
 
           {state.pendingSignatures[0] && <SigningModal request={state.pendingSignatures[0]} signers={signers} onDone={() => void refresh()} />}
-          {signersError && <p className="error banner">{signersError}</p>}
-          <div className="grid2">
-            <PolicyEditor data={signersData} busy={busy} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
-            <CallBuilder data={signersData} busy={busy} version={signersVersion} onSend={(call, via) => void start({ action: "call", call, via })} />
-          </div>
           <CallHistory calls={state.calls} />
 
           {state.run.log.length > 0 && (
