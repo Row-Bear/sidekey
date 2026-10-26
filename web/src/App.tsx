@@ -383,7 +383,7 @@ export default function App({ variant }: { variant: Variant }) {
       <header>
         <div>
           <h1>
-            Stellar Smart Account PoC
+            Sidekey
             {!demo && <span className="tag ok" title="This app only works on the Stellar test network">testnet</span>}
           </h1>
           <p className="muted">

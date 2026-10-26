@@ -1,4 +1,4 @@
-# Development Plan: Stellar Smart Account PoC (testnet)
+# Development Plan: Sidekey, a Stellar smart account PoC (testnet)
 
 Goal: a live testnet demo of a Soroban smart account whose default signer is a
 Stellar `G...` key (master) and whose signing policy lets a second account

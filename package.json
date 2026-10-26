@@ -1,5 +1,5 @@
 {
-  "name": "stellar-smart-account-poc",
+  "name": "sidekey",
   "private": true,
   "type": "module",
   "workspaces": [

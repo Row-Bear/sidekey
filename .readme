@@ -1,6 +1,8 @@
-# Stellar Smart Account PoC
+# Sidekey
 
-A proof of concept for a Soroban smart account on Stellar **testnet**. Its default
+> Your wallet is the master. Everyone else gets a policy.
+
+Sidekey is a proof of concept for a Soroban smart account on Stellar **testnet**. Its default
 signer is a Stellar `G...` key (the *master*). A second key (the *delegate*) is
 named in a signing policy that allows only specific functions on specific
 contracts; everything else is refused.

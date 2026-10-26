@@ -23,7 +23,7 @@ export async function createPasskey(): Promise<PasskeyDelegate> {
   const rpId = location.hostname;
   const credential = (await navigator.credentials.create({
     publicKey: {
-      rp: { id: rpId, name: "Smart account PoC" },
+      rp: { id: rpId, name: "Sidekey" },
       user: { id: crypto.getRandomValues(new Uint8Array(16)), name: "smart-account-delegate", displayName: "Smart account delegate" },
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       // ES256 (P-256), the curve Soroban can verify.
