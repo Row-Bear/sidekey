@@ -130,8 +130,8 @@ yourself, use the **Master signer** panel in the dashboard:
 2. If the account is not on testnet yet, **Fund with Friendbot**.
 3. **Use this wallet as master**: deploys a smart account whose master is your wallet's address. Nothing
    secret is stored; the choice is kept in `wallet-session.json` (gitignored).
-4. **Run full demo**: every master action asks your wallet. Auth entries are signed with `signAuthEntry`
-   (Freighter) or `signMessage` (xBull); step 2, the master's own XLM transfer, is a whole transaction that
+4. **Run full demo**: every master action asks your wallet. Auth entries are signed as a SEP-53 message
+   (`signMessage`, shown as `Authorize <smart account> payload <hash>`) in xBull and Freighter; step 2, the master's own XLM transfer, is a whole transaction that
    the wallet signs and pays for. That is 5 prompts. Delegate steps still use the demo's delegate key.
 
 To run it again with the same wallet, send the XLM back first: in the call builder pick the master as signer
@@ -141,8 +141,8 @@ Switch back with **Demo keys** at any time.
 The wallet shows `Authorize <smart account> payload <hash>` for auth entries, which does not say which call is
 approved; the signing dialog in the dashboard lists the exact calls first.
 
-Tried by hand with the real xBull extension on testnet (full demo, all steps as expected); Freighter is untested
-(see the manual checklist in [STRETCH_PLAN.md](STRETCH_PLAN.md) under WP6).
+Tried by hand with the real xBull and Freighter extensions on testnet (full demo, all steps as expected). Freighter's
+`signAuthEntry` only signs entries for its own G account, so it cannot be used for a smart account.
 
 ## Passkey delegate
 

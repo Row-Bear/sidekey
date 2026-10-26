@@ -13,10 +13,12 @@ import { testWalletModules } from "./testWallet";
 const TESTNET = Networks.TESTNET;
 
 /**
- * Wallets whose kit module rejects `signAuthEntry` (read from the kit's source), so they sign a
- * SEP-53 message instead. Others are tried with `signAuthEntry` first.
+ * Wallets that cannot sign an authorization for a smart account, so they sign a SEP-53 message instead:
+ * their kit module rejects `signAuthEntry` (read from the kit's source), or, like Freighter (found by
+ * hand), the wallet only signs entries for its own G account and blocks ones for a C address.
+ * Others are tried with `signAuthEntry` first.
  */
-const MESSAGE_ONLY = new Set(["xbull", "albedo", "lobstr", "hana", "rabet", "ledger", "trezor", "onekey", "bitget", "fordefi", "wallet_connect", "test-wallet-message"]);
+const MESSAGE_ONLY = new Set(["xbull", "freighter", "albedo", "lobstr", "hana", "rabet", "ledger", "trezor", "onekey", "bitget", "fordefi", "wallet_connect", "test-wallet-message"]);
 
 let initialized = false;
 function ensureKit(): void {

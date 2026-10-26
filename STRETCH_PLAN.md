@@ -53,9 +53,9 @@ pauses and asks the browser:
    `pendingSignature { id, signerKind, address, callSummary, preimageXdr, payloadHex }`
    in `GET /api/state`.
 2. The UI (already polling) shows a prompt, then signs:
-   - master (wallet): `StellarWalletsKit.signAuthEntry(preimageXdr)` where the wallet supports
-     it (Freighter), otherwise `StellarWalletsKit.signMessage(walletMessage(account, payload))`
-     (xBull); both are implemented by the contract (see WP0 findings)
+   - master (wallet): `StellarWalletsKit.signMessage(walletMessage(account, payload))` (xBull,
+     Freighter); `signAuthEntry(preimageXdr)` is kept for other wallets that accept it, but Freighter
+     blocks it for a contract address (found by hand); both are implemented by the contract
    - passkey delegate: `navigator.credentials.get({ challenge: payload })`, then DER to
      compact low-S
 3. The UI posts `POST /api/signature { id, signature }`. The server builds the signature
@@ -219,8 +219,11 @@ locally before sending, accepts base64 or hex, and catches the base64 trap with 
       master is the wallet's G address; no secret is stored anywhere. "Run full demo" in wallet mode
       deploys a fresh smart account for the same wallet (sponsor pays, no prompt), then runs the steps.
       Demo mode is unchanged and is one click away.
-- [x] **Signing**: the master's auth entries use `signAuthEntry` where the wallet supports it
-      (Freighter) and `signMessage` otherwise (xBull), falling back from one to the other. Step 2 is
+- [x] **Signing**: the master's auth entries use `signMessage` for xBull and Freighter (`MESSAGE_ONLY`);
+      other wallets try `signAuthEntry` first and fall back to `signMessage` if it is unsupported.
+      **Freighter finding (by hand):** its `signAuthEntry` only signs entries for the connected G
+      account and shows "Freighter is set to a different account" for the smart account's C address, so
+      it is not "unsupported" and never falls back; Freighter was added to `MESSAGE_ONLY`. Step 2 is
       the master's own transfer: the **wallet signs the whole transaction** (`signTransaction`), is the
       transaction source and pays its fee (`invokeAsSource`). The broker has a new `transaction`
       kind: the server accepts the answer only if it is the same transaction (same hash) with a valid
@@ -240,7 +243,7 @@ locally before sending, accepts base64 or hex, and catches the base64 trap with 
 - [x] **Manual check with the real xBull extension** (done by hand: full demo on a wallet-owned smart account, 5 prompts, every step as expected): connect; make sure
       the message shown is `Authorize C… payload <hash>`; confirm it signs, and that the dashboard
       accepts the signature (the server accepts base64 or hex); confirm step 2's transaction prompt.
-      Repeat with Freighter if installed (it should use `signAuthEntry`).
+      Freighter was checked too (it signs the same message; see the finding above).
 - Done when: with a wallet connected, the master steps are signed in the wallet and the demo
   completes on a new smart account owned by the wallet's G address. Met with the test wallets.
 - Limits: the delegate's key is held by the demo unless a passkey is used (WP5). The wallet's own steps
@@ -295,7 +298,8 @@ locally before sending, accepts base64 or hex, and catches the base64 trap with 
   - [x] xBull (done by hand, all as expected): connect; **Use this wallet as master** (fund first if needed); run the full demo. Check the
     message shown is `Authorize C… payload <hash>`, that each master step is accepted, and that step 2
     shows a transaction prompt. Switch the wallet to mainnet once and check the dashboard refuses.
-  - [ ] Freighter, if installed: the same, expecting `signAuthEntry` instead of messages.
+  - [x] Freighter (done by hand, all as expected): the same, but through `signMessage`; its prompt shows
+    `Stellar Signed Message:` then `Authorize C… payload <hash>`.
   - [x] Passkey from a **password-manager extension** in a real browser: created, full demo and expiry
     demo as expected (claim succeeded, withdraw refused with `NotAllowed`, expired passkey refused with
     `SignerExpired`). The extension's own client data and user-verification flag satisfy the contract's
@@ -314,8 +318,9 @@ WP3 is cheap and unlocks both wallet and passkey, so do it right after WP2.
 ## Risks and open items
 
 - **Wallet support differs**: xBull cannot `signAuthEntry`; it uses `signMessage` (above).
-  Freighter supports `signAuthEntry`. The message path is verified with mocks, on-chain and by hand
-  with the real xBull extension; Freighter is untested.
+  Freighter exposes `signAuthEntry` but blocks it for a contract address, so it uses `signMessage` too.
+  The message path is verified with mocks, on-chain and by hand with the real xBull and Freighter
+  extensions. Other wallets that claim `signAuthEntry` are untested and may block it the same way.
 - **Blind signing**: a wallet shows `Authorize <account> payload <hash>`, so the user cannot
   see which call they approve; the dashboard's call summary is the only readable description.
 - **Passkey signature format**: DER to compact conversion and low-S normalization are the
