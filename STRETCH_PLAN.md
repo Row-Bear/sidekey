@@ -327,8 +327,12 @@ locally before sending, accepts base64 or hex, and catches the base64 trap with 
   last-slot case); `npm run e2e:wallet` now also covers the record prompt, a declined record, recording later,
   reading the entries back from chain, loading the first account again, four refused loads, and a master action
   on the loaded account. Checked by hand in the dashboard with a test wallet (the refusal message shows).
-- Not yet tried by hand with xBull or Freighter: the `manage_data` transaction prompt, and the 0.5 XLM reserve
-  on a real wallet account.
+- Done by hand with the real xBull extension on testnet (all as expected): **Record on my wallet** for an
+  existing account (`smart_account_1`), then **Run full demo** with the automatic record prompt (6 prompts; the
+  new account became `smart_account_2`; both entries read back from chain and shown in the picker as "on your
+  account"), then loading the other account from the picker. xBull signs the `manage_data` transaction like any
+  transaction of its own account. Not tried with Freighter. The master was topped up first by merging a funded
+  throwaway account into it.
 
 ## Suggested cut line
 
