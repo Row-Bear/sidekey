@@ -378,6 +378,32 @@ locally before sending, accepts base64 or hex, and catches the base64 trap with 
     passes on the new wasm. Existing smart accounts keep their old wasm (no upgrade function), so they cannot
     take the new constraint.
 
+### UI review of the plain page (`/`) - done
+
+A review of the page found these problems, all fixed in four batches (`/demo` keeps its own layout):
+
+- **Results far from the action** (the outcome of an edit or call showed only in the history, about 1,900px down):
+  a toast now reports each result where it was made; cancelled signatures are marked (`cancelled` on the call
+  record) and shown neutrally instead of as failures.
+- **Tools shown without the owning wallet:** the policy editor needs it, master calls are disabled until it is
+  connected (the passkey delegate still works without it).
+- **Signing policy disagreed with the editor** (it showed one delegate while the editor listed others): the
+  table is now the single source of truth, with every on-chain signer, its status and rules, and the actions
+  per signer (remove a rule, set expiry, revoke with a confirmation). The editor only adds a rule and asks for an
+  expiry only when registering a new signer. "Give permission to" and "Call as" default to the active delegate.
+- **A noisy top box:** the wallet is a header chip (name, address, menu); one compact Smart account card holds the
+  account picker, create, record-on-wallet with a recorded tag, and one delegate-passkey row; explanations are
+  tooltips.
+- **Smaller things:** friendlier errors with the raw text under Details, a quiet hint for incomplete input,
+  examples that depend on the selected contract, a one-line-per-entry activity list (latest five), readable
+  signer names and short addresses in titles, copy buttons, a collapsed run log, and a two-column area that no
+  longer overflows narrow screens.
+
+The page is about 40% shorter (2,583px to about 1,590px in the review viewport). Checked in the browser with a dev
+test wallet: register a delegate, set expiry, remove a rule and revoke from the table, create and record an
+account from the new card, and the toast for success, failure and cancellation. 49 web tests (ordering, expiry,
+examples, error text, address shortening; every deliberate break caught) and 95 core tests pass.
+
 ## Suggested cut line
 
 About 12 hours in total. If time is short, the value order is:

@@ -5,6 +5,7 @@ import { ArgInput } from "./ArgInput";
 import type { SigningVia } from "./api-types";
 import { useDebounced } from "./hooks";
 import { SignWith } from "./SignWith";
+import { Info } from "./Info";
 import { delegatesFirst } from "./signers";
 import { examplesFor } from "./examples";
 
@@ -127,8 +128,8 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
     <section className="card">
       <h2>Call builder</h2>
       <p className="muted small">
-        Pick a signer and a call. The policy check below runs the real simulation and tests every call the account
-        would have to authorize, without sending anything.
+        Preview a call against the signer's policy, then send it.{" "}
+        <Info text="The preview runs the real simulation and tests every call the account would have to authorize, without sending anything." />
       </p>
       {examples.length > 0 && (
         <div className="chips">

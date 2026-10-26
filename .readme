@@ -104,8 +104,8 @@ account become unreachable. A full run takes about a minute.
 
 `npm run web` serves two pages from the same dev server:
 
-- **`/` is the policy tester (MVP).** No demo keys and no demo steps. Connect your wallet, create or load a smart
-  account for it, optionally create a passkey as the delegate, set the delegate's policy in the **policy editor**
+- **`/` is the policy tester (MVP).** No demo keys and no demo steps. Connect your wallet (header button), create or
+  load a smart account for it, optionally create a passkey as the delegate, set the delegate's policy in the **policy editor**
   (which contracts, functions and arguments it may call, and for how long) and send calls in the **call builder**.
   The master always signs in your wallet and the delegate with its passkey (or by pasted signature for another key).
   If the guided demo left the shared session in demo-key mode, this page switches back to your wallet account.
