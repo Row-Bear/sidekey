@@ -450,3 +450,18 @@ open argument ("any" or a limit) or a structured value shows **Fill in...**, whi
 contract picker, fills in the signer, function and known arguments in the call builder, and scrolls
 to it. Logic: `callFromRule` in `web/src/signers.ts`. (Briefly there were saved-call cards; they were
 dropped in favour of this, as a rule already identifies the call.)
+
+## Hosting as a PWA
+
+Done: web manifest, icons, a small service worker (app shell only; API and cross-origin requests
+always use the network), a `404.html` copy for `/demo`, and two build settings:
+`VITE_BASE=/repo-name/` for sub-path hosting and `VITE_API_BASE=https://api.example` for an API on
+another origin. Checked on a build under `/sidekey/`: the service worker activates, the manifest
+loads and `/demo` routes correctly.
+
+Not done: the static page needs the API. Everything under `/api/*` (`web/server/api.ts`) runs
+Node code in `packages/core`: `deploy.ts` calls the Stellar CLI, `session.ts`, `history.ts`,
+`results.ts` and `envfile.ts` use files, and the fee sponsor's secret key is in `.env`. A hosted
+version needs that API on a server (with CORS, rate limits and the sponsor key kept there) or the
+parts ported to the browser. Mobile wallets are also needed for the master (extensions do not run
+on phones); passkeys work, registered per domain.

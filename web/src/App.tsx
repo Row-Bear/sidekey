@@ -403,7 +403,7 @@ export default function App({ variant }: { variant: Variant }) {
               </button>
             </>
           )}
-          <a className="nav-link" href={demo ? "/" : "/demo"}>
+          <a className="nav-link" href={demo ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}demo`}>
             {demo ? "← Policy tester" : "Guided demo →"}
           </a>
           {!demo && state && (
