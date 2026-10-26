@@ -66,6 +66,20 @@ export const setMasterMode = (mode: "demo" | "wallet") =>
     body: JSON.stringify({ mode }),
   });
 
+export const registerPasskey = (passkey: { credentialId: string; publicKeyHex: string; rpId: string }) =>
+  getJson<{ delegate: string }>("/api/passkey", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "register", ...passkey }),
+  });
+
+export const selectDelegate = (delegate: "key" | "passkey") =>
+  getJson<{ delegate: string }>("/api/passkey", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "select", delegate }),
+  });
+
 export const looksLikeContractId = (text: string) => /^C[A-Z2-7]{55}$/.test(text.trim());
 
 export async function startRun(request: RunRequest): Promise<void> {
@@ -80,7 +94,9 @@ export async function startRun(request: RunRequest): Promise<void> {
 const EXPLORER = "https://stellar.expert/explorer/testnet";
 export const accountUrl = (address: string) => `${EXPLORER}/${address.startsWith("C") ? "contract" : "account"}/${address}`;
 
-export const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-6)}`;
+/** A G or C address shortened; anything else (a passkey's name) is shown as it is. */
+export const shortAddress = (address: string) =>
+  /^[GC][A-Z2-7]{55}$/.test(address) ? `${address.slice(0, 6)}…${address.slice(-6)}` : address;
 
 /** Amounts arrive as stroops (1 XLM = 10^7); trim to what is readable. */
 export function formatXlm(stroops: string): string {

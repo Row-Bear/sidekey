@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RuleView, StepResult } from "@poc/core";
 import type { DemoState, StepMeta } from "./api-types";
 import {
@@ -15,6 +15,8 @@ import {
 import { CallBuilder } from "./CallBuilder";
 import { CallHistory } from "./CallHistory";
 import { useSigners } from "./hooks";
+import { PasskeyPanel } from "./PasskeyPanel";
+import { passkeySigner } from "./passkey";
 import { PolicyEditor } from "./PolicyEditor";
 import { SigningModal } from "./SigningModal";
 import { useWallet } from "./wallet";
@@ -29,6 +31,7 @@ const STATUS_LABEL: Record<StepStatus, string> = {
 };
 
 function AddressLink({ address, label }: { address: string; label?: string }) {
+  if (!/^[GC][A-Z2-7]{55}$/.test(address)) return <span>{label ?? address}</span>;
   return (
     <a href={accountUrl(address)} target="_blank" rel="noreferrer" title={address}>
       {label ?? shortAddress(address)}
@@ -233,6 +236,8 @@ export default function App() {
   }, [busy]);
   const { data: signersData, error: signersError } = useSigners(signersVersion);
   const wallet = useWallet();
+  const passkey = state?.passkey ?? null;
+  const signers = useMemo(() => [...wallet.signers, ...(passkey ? [passkeySigner(passkey)] : [])], [wallet.signers, passkey]);
 
   useEffect(() => {
     void refresh();
@@ -298,6 +303,14 @@ export default function App() {
               setSignersVersion((v) => v + 1);
             }}
           />
+          <PasskeyPanel
+            state={state}
+            busy={busy}
+            onChanged={() => {
+              void refresh();
+              setSignersVersion((v) => v + 1);
+            }}
+          />
           <div className="grid">
             <Accounts state={state} />
             <Balances state={state} />
@@ -344,7 +357,7 @@ export default function App() {
             </section>
           )}
 
-          {state.pendingSignatures[0] && <SigningModal request={state.pendingSignatures[0]} signers={wallet.signers} onDone={() => void refresh()} />}
+          {state.pendingSignatures[0] && <SigningModal request={state.pendingSignatures[0]} signers={signers} onDone={() => void refresh()} />}
           {signersError && <p className="error banner">{signersError}</p>}
           <div className="grid2">
             <PolicyEditor data={signersData} busy={busy} onApply={(policy, via) => void start({ action: "policy", policy, via })} />

@@ -245,29 +245,40 @@ client accepts both common encodings).
       Repeat with Freighter if installed (it should use `signAuthEntry`).
 - Done when: with a wallet connected, the master steps are signed in the wallet and the demo
   completes on a new smart account owned by the wallet's G address. Met with the test wallets.
-- Limits: the delegate's key is still held by the demo (passkey in WP5). The wallet's own steps
+- Limits: the delegate's key is held by the demo unless a passkey is used (WP5). The wallet's own steps
   show as `Authorize <account> payload <hash>`, so the dashboard's summary is the readable
   description. `npm audit` reports advisories from wallet integrations the kit depends on
   (WalletConnect, Ledger, Trezor) that are not bundled here.
 
-### WP5: Passkey delegate (goal 5; about 3 h)
+### WP5: Passkey delegate (goal 5) - done
 
-- [ ] Contract: passkey verification from the design above, with unit tests using a P-256
-      key and a synthetic WebAuthn assertion (valid, wrong challenge, wrong rp id hash,
-      user-present flag missing, high-S signature, wrong key, expired signer).
-- [ ] Registration: "Add passkey delegate" calls `navigator.credentials.create` (ES256,
-      user verification required, rp id from the page host), extracts the 65-byte public key,
-      stores the credential id (local storage, keyed by smart account), then the master
-      registers it with `set_signer(Passkey(pk), expiry, sha256(rp id))` and its rules.
-- [ ] Signing: `navigator.credentials.get` with the signature payload as the challenge, DER
-      to compact, normalize to low-S, post through the broker.
-- [ ] Signer dropdown shows the passkey signer; steps 5 and 6 can run with it (each needs a
-      user touch). The default demo uses the passkey; the CLI runner and the recorded run
-      keep the ed25519 delegate.
-- [ ] Origin binding: the rp id hash is stored on-chain. Localhost works for dev; a hosted
-      demo needs HTTPS and its own registration.
-- Done when: a passkey-signed `claim` succeeds, a passkey-signed `withdraw` is rejected by
-  the policy, and the same passkey is refused after its expiry.
+- [x] Contract: `SignerId::Passkey(BytesN<65>)`, `set_passkey(public_key, rp_id_hash, valid_until,
+      rules)`, `AccSignature::Passkey` and strict WebAuthn checks (authenticator data length, rp id
+      hash from the stored policy, user-present and user-verified flags, `clientDataJSON` starting
+      exactly with `{"type":"webauthn.get","challenge":"<payload>"`, then `secp256r1_verify`).
+      54 contract tests, including 32 real browser assertions (`test-fixtures/webauthn-assertions.json`)
+      and synthetic negatives; 8 deliberate breaks of the checks were all caught.
+- [x] Registration: **Create passkey** in the dashboard (`navigator.credentials.create`, ES256, user
+      verification required, rp id = page host). The server keeps the credential id and public key in
+      `wallet-session.json`; the first step of the demo registers it with `set_passkey`.
+- [x] Signing: `navigator.credentials.get` with the signature payload as the challenge. The browser
+      sends the raw authenticator data, `clientDataJSON` and DER signature; the **server** converts
+      to compact low-S and checks the assertion (as the contract would) before accepting, so a bad
+      answer is refused early and can be retried. (The plan said the browser would normalize; moving
+      it server-side keeps one tested implementation in `packages/core/src/passkey.ts`.)
+- [x] Delegate selector (demo key or passkey) in the dashboard; the signer dropdown, policy editor
+      and call builder show the passkey. A passkey always signs in the browser. The CLI runner and the
+      recorded run keep the ed25519 delegate.
+- [x] Origin binding: the rp id hash is stored on-chain with the signer. `localhost` works for dev; a
+      hosted demo needs HTTPS and a new passkey on that domain.
+- Verified in the dashboard with a Chrome **virtual authenticator** on a fresh account: passkey-signed
+  `claim` succeeded, passkey-signed `withdraw` was refused (`NotAllowed #3`), the master withdrew, and
+  after the expiry demo the passkey `claim` was refused (`SignerExpired #5`).
+- Cost: the passkey check uses about 3.4M CPU instructions (0.8% of the 400M limit).
+- Limits: only a virtual authenticator has been tried here; a real device (Touch ID, Windows Hello or a
+  security key) is still a manual check. The passkey is a delegate only; the master stays ed25519. Half of
+  real signatures are high-S; the server normalizes them before submission, and the contract refuses
+  any that are not.
 
 ### WP6: Integration, docs and recorded run (about 1.5 h)
 

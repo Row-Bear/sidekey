@@ -171,7 +171,7 @@ export function CallBuilder({ data, busy, version, onSend }: {
           {busy ? "Working…" : rejected ? "Send anyway (expect a rejection)" : "Send"}
         </button>
         {signer && !signer.hasKey && !signer.viaBrowser && via !== "browser" && <span className="muted small">This demo holds no key for that signer.</span>}
-        {signer?.viaBrowser && <span className="muted small">Signed in your wallet.</span>}
+        {signer?.viaBrowser && <span className="muted small">{signer.kind === "passkey" ? "Signed with your passkey." : "Signed in your wallet."}</span>}
       </div>
     </section>
   );

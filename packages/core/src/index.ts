@@ -2,6 +2,7 @@ export * from "./config.js";
 export * from "./policy.js";
 export * from "./spec.js";
 export * from "./wallet.js";
+export * from "./passkey.js";
 export * from "./broker.js";
 export * from "./chain.js";
 export * from "./scenario.js";

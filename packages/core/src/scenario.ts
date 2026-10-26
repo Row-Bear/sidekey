@@ -1,6 +1,7 @@
-import { Address, Keypair, nativeToScVal, rpc, type xdr } from "@stellar/stellar-sdk";
+import { Address, Keypair, nativeToScVal, rpc, xdr } from "@stellar/stellar-sdk";
 import { Authorizer, ChainContext, invoke, invokeAsSource, InvokeResult, read } from "./chain.js";
 import { DEFAULT_RPC_URL, NATIVE_TOKEN_ID, requireEnv, STROOPS_PER_XLM } from "./config.js";
+import { rpIdHash } from "./passkey.js";
 import { optionLedgerScVal, parseSignerPolicy, rulesScVal, signerIdScVal, type SignerPolicyView } from "./policy.js";
 
 export const FUND_AMOUNT = 9_500n * STROOPS_PER_XLM;
@@ -17,7 +18,18 @@ export const SHORT_VALIDITY_LEDGERS = LEDGERS_PER_MINUTE;
 /** Produces the smart account's signature somewhere else (a wallet, a passkey, a person). */
 export type RemoteSign = (preimageXdr: string, payload: Uint8Array) => Promise<xdr.ScVal>;
 
+/** A passkey acting as the delegate; its signatures always come from the browser. */
+export interface DelegatePasskey {
+  /** 65-byte uncompressed P-256 public key. */
+  publicKey: Uint8Array;
+  rpId: string;
+  /** sha256 of `rpId`, as stored in the account's policy. */
+  rpIdHash: Uint8Array;
+}
+
 export interface ScenarioContext extends ChainContext {
+  /** Set when the delegate is a passkey instead of the demo's own key. */
+  delegatePasskey?: DelegatePasskey;
   /**
    * True when the master is a connected wallet: `master` then has an address but no secret, and
    * everything the master signs goes through `remoteSigners` or `remoteTransactionSigner`.
@@ -41,7 +53,17 @@ export interface ScenarioContext extends ChainContext {
 export function createScenarioContext(env: Record<string, string | undefined> = process.env): ScenarioContext {
   const rpcUrl = env.RPC_URL ?? DEFAULT_RPC_URL;
   const walletMaster = env.MASTER_MODE === "wallet";
+  const passkeyHex = env.DELEGATE_PASSKEY_PUBLIC;
   return {
+    ...(passkeyHex && env.DELEGATE_PASSKEY_RP
+      ? {
+          delegatePasskey: {
+            publicKey: Buffer.from(passkeyHex, "hex"),
+            rpId: env.DELEGATE_PASSKEY_RP,
+            rpIdHash: rpIdHash(env.DELEGATE_PASSKEY_RP),
+          },
+        }
+      : {}),
     walletMaster,
     rpcUrl,
     server: new rpc.Server(rpcUrl),
@@ -97,6 +119,9 @@ const xlm = (stroops: bigint) => `${(Number(stroops) / Number(STROOPS_PER_XLM)).
 
 const smartAuth = (ctx: ScenarioContext, who: "master" | "delegate"): Authorizer => {
   const remote = ctx.remoteSigners?.[who];
+  if (who === "delegate" && ctx.delegatePasskey && !remote) {
+    throw new Error("The delegate is a passkey: its signature must come from the browser");
+  }
   if (who === "master" && ctx.walletMaster && !remote) {
     throw new Error("The master is a connected wallet: its signatures must come from the wallet, not the server");
   }
@@ -128,12 +153,15 @@ export async function waitForYield(ctx: ScenarioContext, timeoutSeconds = 180): 
   }
 }
 
+/** The delegate's public key: the passkey when there is one, otherwise the demo's key. */
+export const delegateKey = (ctx: ScenarioContext): Uint8Array => ctx.delegatePasskey?.publicKey ?? ctx.delegate.rawPublicKey();
+
 export async function latestLedger(ctx: ScenarioContext): Promise<number> {
   return (await ctx.server.getLatestLedger()).sequence;
 }
 
 export async function readDelegatePolicy(ctx: ScenarioContext): Promise<SignerPolicyView | null> {
-  const native = await read(ctx, ctx.smartAccountId, "get_signer", [signerIdScVal(ctx.delegate.rawPublicKey())]);
+  const native = await read(ctx, ctx.smartAccountId, "get_signer", [signerIdScVal(delegateKey(ctx))]);
   return native ? parseSignerPolicy(native) : null;
 }
 
@@ -176,18 +204,18 @@ export const STEPS: StepSpec[] = [
     expected: "success",
     run: async (ctx) => {
       const validUntil = (await latestLedger(ctx)) + DELEGATE_VALIDITY_LEDGERS;
+      const rules = rulesScVal([{ contract: ctx.simId, function: "claim", args: [{ kind: "self" }] }]);
+      const passkey = ctx.delegatePasskey;
       return {
         result: await invoke(ctx, {
           contractId: ctx.smartAccountId,
-          method: "set_signer",
-          args: [
-            signerIdScVal(ctx.delegate.rawPublicKey()),
-            optionLedgerScVal(validUntil),
-            rulesScVal([{ contract: ctx.simId, function: "claim", args: [{ kind: "self" }] }]),
-          ],
+          method: passkey ? "set_passkey" : "set_signer",
+          args: passkey
+            ? [xdr.ScVal.scvBytes(Buffer.from(passkey.publicKey)), xdr.ScVal.scvBytes(Buffer.from(passkey.rpIdHash)), optionLedgerScVal(validUntil), rules]
+            : [signerIdScVal(ctx.delegate.rawPublicKey()), optionLedgerScVal(validUntil), rules],
           authorizers: [smartAuth(ctx, "master")],
         }),
-        note: `delegate valid until ledger ${validUntil}`,
+        note: `${passkey ? "passkey delegate" : "delegate"} valid until ledger ${validUntil}`,
       };
     },
   },
@@ -286,7 +314,7 @@ export const STEPS: StepSpec[] = [
         result: await invoke(ctx, {
           contractId: ctx.smartAccountId,
           method: "set_expiry",
-          args: [signerIdScVal(ctx.delegate.rawPublicKey()), optionLedgerScVal(validUntil)],
+          args: [signerIdScVal(delegateKey(ctx)), optionLedgerScVal(validUntil)],
           authorizers: [smartAuth(ctx, "master")],
         }),
         note: `delegate now valid until ledger ${validUntil}`,

@@ -18,9 +18,35 @@ const variant = (name: string, ...values: xdr.ScVal[]) => xdr.ScVal.scvVec([xdr.
 
 const field = (key: string, val: xdr.ScVal) => new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });
 
-/** `SignerId::Ed25519(BytesN<32>)` for a raw ed25519 public key. */
-export const signerIdScVal = (rawPublicKey: Uint8Array): xdr.ScVal =>
-  variant("Ed25519", xdr.ScVal.scvBytes(Buffer.from(rawPublicKey)));
+/**
+ * `SignerId` for a raw public key: a 32-byte ed25519 key, or a 65-byte uncompressed secp256r1 key
+ * (a passkey).
+ */
+export function signerIdScVal(publicKey: Uint8Array): xdr.ScVal {
+  if (publicKey.length !== 32 && publicKey.length !== 65) {
+    throw new Error(`A signer key is 32 bytes (ed25519) or 65 bytes (passkey), not ${publicKey.length}`);
+  }
+  return variant(publicKey.length === 65 ? "Passkey" : "Ed25519", xdr.ScVal.scvBytes(Buffer.from(publicKey)));
+}
+
+/** `Passkey(PasskeySignature { authenticator_data, client_data_json, public_key, sig })`; `sig` is compact low-S. */
+export function passkeySignatureScVal(parts: {
+  publicKey: Uint8Array;
+  authenticatorData: Uint8Array;
+  clientDataJson: Uint8Array;
+  signature: Uint8Array;
+}): xdr.ScVal {
+  const bytes = (b: Uint8Array) => xdr.ScVal.scvBytes(Buffer.from(b));
+  return variant(
+    "Passkey",
+    xdr.ScVal.scvMap([
+      field("authenticator_data", bytes(parts.authenticatorData)),
+      field("client_data_json", bytes(parts.clientDataJson)),
+      field("public_key", bytes(parts.publicKey)),
+      field("sig", bytes(parts.signature)),
+    ]),
+  );
+}
 
 export function argConstraintScVal(constraint: ArgConstraintInput): xdr.ScVal {
   switch (constraint.kind) {
@@ -81,6 +107,8 @@ export interface RuleView {
 export interface SignerPolicyView {
   /** Last ledger (inclusive) in which the signer is accepted; null means no expiry. */
   validUntilLedger: number | null;
+  /** For a passkey: sha256 of its relying party id, hex. Null for other signers. */
+  rpIdHashHex: string | null;
   rules: RuleView[];
 }
 
@@ -107,10 +135,12 @@ function parseConstraint(native: unknown): ArgConstraintView {
 export function parseSignerPolicy(native: unknown): SignerPolicyView {
   const policy = native as {
     valid_until_ledger?: number | null;
+    rp_id_hash?: Uint8Array | null;
     rules: { contract: string; function: string; args: unknown[] }[];
   };
   return {
     validUntilLedger: policy.valid_until_ledger ?? null,
+    rpIdHashHex: policy.rp_id_hash ? Buffer.from(policy.rp_id_hash).toString("hex") : null,
     rules: policy.rules.map((rule) => ({
       contract: rule.contract,
       function: rule.function,

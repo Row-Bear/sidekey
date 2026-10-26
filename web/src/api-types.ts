@@ -1,4 +1,4 @@
-import type { CallRecord, CallRequest, PendingSignature, PolicyOp, SignerPolicyView, Snapshot, StepResult, WalletAccount } from "@poc/core";
+import type { CallRecord, CallRequest, PasskeyDelegate, PendingSignature, PolicyOp, SignerPolicyView, Snapshot, StepResult, WalletAccount } from "@poc/core";
 
 export interface StepMeta {
   n: number;
@@ -22,6 +22,10 @@ export interface DemoState {
   mode: "demo" | "wallet";
   /** The last wallet smart account, kept when switching back to demo mode. */
   wallet: WalletAccount | null;
+  /** Who plays the delegate: the demo's own key, or a passkey created in the browser. */
+  delegate: "key" | "passkey";
+  /** The passkey, kept when the delegate is switched back to the key. */
+  passkey: PasskeyDelegate | null;
   /** Live on-chain values; null when the RPC read failed (see `readError`). */
   snapshot: Snapshot | null;
   /** The delegate's policy on the account: expiry and rules. Null if it is not registered or unreadable. */

@@ -27,6 +27,7 @@ import {
   loadResults,
   loadSession,
   NETWORK_PASSPHRASE,
+  type PasskeyDelegate,
   type PolicyOp,
   previewCall,
   readDelegatePolicy,
@@ -123,9 +124,25 @@ function parseSignatureBody(body: unknown): SignatureBody {
     return { id: b.id, response: { kind: r.kind, signature: r.signature } };
   }
   if (r.kind === "transaction" && isText(r.signedXdr)) return { id: b.id, response: { kind: "transaction", signedXdr: r.signedXdr } };
+  if (r.kind === "passkey" && isText(r.authenticatorData) && isText(r.clientDataJson) && isText(r.signature)) {
+    return {
+      id: b.id,
+      response: { kind: "passkey", authenticatorData: r.authenticatorData, clientDataJson: r.clientDataJson, signature: r.signature },
+    };
+  }
   throw new Error(
-    'Invalid signature answer: expected response {kind: "payload" | "message", signature}, {kind: "transaction", signedXdr} or cancel: true',
+    'Invalid signature answer: expected response {kind: "payload" | "message", signature}, {kind: "transaction", signedXdr}, {kind: "passkey", authenticatorData, clientDataJson, signature} or cancel: true',
   );
+}
+
+/** A passkey the browser just created; its relying party must be the host the page is served from. */
+function parsePasskey(body: Record<string, unknown>, host: string): PasskeyDelegate {
+  const hostname = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+  const { credentialId, publicKeyHex, rpId } = body;
+  if (!isText(credentialId) || !/^[A-Za-z0-9_-]{8,1024}$/.test(credentialId)) throw new Error("Invalid passkey: credentialId must be base64url");
+  if (!isText(publicKeyHex) || !/^04[0-9a-f]{128}$/.test(publicKeyHex)) throw new Error("Invalid passkey: publicKeyHex must be a 65-byte uncompressed P-256 key");
+  if (!isText(rpId) || rpId !== hostname) throw new Error(`Invalid passkey: its relying party must be ${hostname}`);
+  return { credentialId, publicKeyHex, rpId };
 }
 
 function parseAddress(value: unknown): string {
@@ -161,13 +178,17 @@ export function demoApi(repoRoot: string): Plugin {
   const currentContext = () =>
     createScenarioContext({ ...process.env, ...parse(readFileSync(envPath)), ...sessionEnv(loadSession(sessionPath)) });
 
-  /** In wallet mode the master's signatures always come from the browser; elsewhere only when asked. */
+  /**
+   * Who signs in the browser: everything when asked, a wallet master always, and a passkey always (it
+   * never leaves the browser). Otherwise null, and the demo signs with the key it holds.
+   */
   const signingFor = (ctx: ReturnType<typeof currentContext>, via: "browser" | undefined): SigningSource | undefined => {
-    const browser = (signer: { label: string; raw: Uint8Array }): Authorizer[] => [
-      brokerAuthorizer(broker, { account: ctx.smartAccountId, signerRaw: signer.raw, signerLabel: signer.label }),
+    const browser = (signer: { label: string; raw: Uint8Array; rpIdHash?: Uint8Array }): Authorizer[] => [
+      brokerAuthorizer(broker, { account: ctx.smartAccountId, signerRaw: signer.raw, rpIdHash: signer.rpIdHash, signerLabel: signer.label }),
     ];
     if (via === "browser") return browser;
-    return ctx.walletMaster ? (signer) => (signer.id === "master" ? browser(signer) : null) : undefined;
+    if (!ctx.walletMaster && !ctx.delegatePasskey) return undefined;
+    return (signer) => (signer.raw.length === 65 || (ctx.walletMaster && signer.id === "master") ? browser(signer) : null);
   };
 
   const run: DemoState["run"] = { busy: false, currentStep: null, label: null, log: [], lastError: null };
@@ -183,12 +204,14 @@ export function demoApi(repoRoot: string): Plugin {
       accounts: {
         sponsor: ctx.sponsor.publicKey(),
         master: ctx.master.publicKey(),
-        delegate: ctx.delegate.publicKey(),
+        delegate: ctx.delegatePasskey ? `passkey ${Buffer.from(ctx.delegatePasskey.publicKey).toString("hex").slice(2, 10)}…` : ctx.delegate.publicKey(),
         smartAccount: ctx.smartAccountId,
         simulator: ctx.simId,
       },
       mode: ctx.walletMaster ? "wallet" : "demo",
       wallet: loadSession(sessionPath).wallet ?? null,
+      delegate: ctx.delegatePasskey ? "passkey" : "key",
+      passkey: loadSession(sessionPath).passkey ?? null,
       snapshot: null,
       delegatePolicy: null,
       latestLedger: null,
@@ -271,6 +294,18 @@ export function demoApi(repoRoot: string): Plugin {
         // The delegate's key is held by the demo, so it signs itself unless the browser was asked to.
         if (viaBrowser) ctx.remoteSigners.delegate = asBrowser("delegate", ctx.delegate.rawPublicKey());
       }
+      if (ctx.delegatePasskey) {
+        // A passkey never leaves the browser, so its steps always ask for it.
+        ctx.remoteSigners = {
+          ...ctx.remoteSigners,
+          delegate: brokerSigner(broker, {
+            account: ctx.smartAccountId,
+            signerRaw: ctx.delegatePasskey.publicKey,
+            rpIdHash: ctx.delegatePasskey.rpIdHash,
+            signerLabel: "delegate",
+          }),
+        };
+      }
       if (ctx.walletMaster) {
         ctx.remoteTransactionSigner = (transactionXdr, summary) =>
           broker.requestTransaction({
@@ -334,6 +369,26 @@ export function demoApi(repoRoot: string): Plugin {
             const address = parseAddress(new URL(req.url ?? "", "http://localhost").searchParams.get("address"));
             const status = await accountStatus(currentContext().rpcUrl, address);
             return json(res, 200, status.exists ? { exists: true, stroops: status.stroops.toString() } : { exists: false });
+          }
+
+          if (req.method === "POST" && path === "/passkey") {
+            if (run.busy) return json(res, 409, { error: "A run is in progress" });
+            const body = (await readBody(req)) as Record<string, unknown>;
+            const session = loadSession(sessionPath);
+            if (body.action === "register") {
+              const passkey = parsePasskey(body, req.headers.host ?? "");
+              saveSession(sessionPath, { ...session, delegate: "passkey", passkey });
+              return json(res, 200, { delegate: "passkey" });
+            }
+            if (body.action === "select") {
+              if (body.delegate === "passkey" && !session.passkey) {
+                return json(res, 409, { error: "Create a passkey first" });
+              }
+              if (body.delegate !== "key" && body.delegate !== "passkey") return json(res, 400, { error: 'delegate must be "key" or "passkey"' });
+              saveSession(sessionPath, { ...session, delegate: body.delegate });
+              return json(res, 200, { delegate: body.delegate });
+            }
+            return json(res, 400, { error: 'action must be "register" or "select"' });
           }
 
           if (req.method === "POST" && path === "/mode") {

@@ -5,7 +5,7 @@ import { Account, Address, Contract, Keypair, rpc, scValToNative, StrKey, Transa
 import { FRIENDBOT_URL, NATIVE_TOKEN_ID, NETWORK_PASSPHRASE, requireEnv } from "./config.js";
 import { deploySmartAccount } from "./deploy.js";
 import { setEnvValues } from "./envfile.js";
-import { saveSession } from "./session.js";
+import { loadSession, saveSession } from "./session.js";
 
 export const WASM_RELATIVE_PATH = "target/wasm32v1-none/release/smart_account.wasm";
 
@@ -89,7 +89,8 @@ export async function createWalletAccount({ repoRoot, sessionPath, masterAddress
   log(`Deploying a smart account whose master is the wallet ${masterAddress}`);
   const { contractId } = deploySmartAccount({ sponsorSecret: requireEnv("SPONSOR_SECRET"), masterPublic: masterAddress, wasmPath, cwd: repoRoot });
   const wallet = { address: masterAddress, smartAccountId: contractId };
-  saveSession(sessionPath, { mode: "wallet", wallet });
+  // Keep whatever else the session holds (such as the passkey delegate).
+  saveSession(sessionPath, { ...loadSession(sessionPath), mode: "wallet", wallet });
   log(`Smart account ${contractId} deployed`);
   return wallet;
 }

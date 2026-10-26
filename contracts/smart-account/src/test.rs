@@ -1,5 +1,7 @@
 extern crate std;
 
+use std::string::ToString;
+
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 use soroban_sdk::{
@@ -12,8 +14,8 @@ use soroban_sdk::{
 };
 
 use crate::{
-    AccError, AccSignature, ArgConstraint, Ed25519Signature, Rule, SignerId, SignerPolicy, SmartAccount,
-    SmartAccountClient,
+    AccError, AccSignature, ArgConstraint, Ed25519Signature, PasskeySignature, Rule, SignerId, SignerPolicy,
+    SmartAccount, SmartAccountClient,
 };
 
 type CheckResult = Result<(), Result<AccError, InvokeError>>;
@@ -447,7 +449,7 @@ fn set_signer_replaces_the_whole_policy() {
     f.client.set_signer(&delegate_id(&f), &Some(500), &vec![&f.env, other.clone()]);
 
     let policy = f.client.get_signer(&delegate_id(&f)).unwrap();
-    assert_eq!(policy, SignerPolicy { valid_until_ledger: Some(500), rules: vec![&f.env, other] });
+    assert_eq!(policy, SignerPolicy { valid_until_ledger: Some(500), rp_id_hash: None, rules: vec![&f.env, other] });
     assert_eq!(delegate_claims(&f), Err(Ok(AccError::NotAllowed)));
     assert_eq!(f.client.list_signers().len(), 1);
 }
@@ -622,4 +624,330 @@ fn an_expired_delegate_is_refused_with_a_message_signature_too() {
     let payload = BytesN::from_array(&f.env, &[7u8; 32]);
     let sig = message_signature(&f, &f.delegate, &account_text(&f), &payload);
     assert_eq!(check_with(&f, sig, &payload, claim_ctx(&f)), Err(Ok(AccError::SignerExpired)));
+}
+
+// ---- Passkey delegates (WebAuthn) ----
+
+use base64::{engine::general_purpose::STANDARD, Engine};
+use p256::ecdsa::{signature::hazmat::PrehashSigner, Signature as P256Signature, SigningKey as P256Key};
+use serde::Deserialize;
+
+/// Real output of a Chrome virtual authenticator (ES256, user verification), one fixture per assertion.
+#[derive(Deserialize)]
+struct WebAuthnFixture {
+    spki: std::string::String,
+    assertions: std::vec::Vec<RealAssertion>,
+}
+
+#[derive(Deserialize, Clone)]
+struct RealAssertion {
+    challenge: std::string::String,
+    #[serde(rename = "authenticatorData")]
+    authenticator_data: std::string::String,
+    #[serde(rename = "clientDataJSON")]
+    client_data_json: std::string::String,
+    signature: std::string::String,
+}
+
+fn webauthn_fixture() -> WebAuthnFixture {
+    serde_json::from_str(include_str!("../test-fixtures/webauthn-assertions.json")).unwrap()
+}
+
+fn b64(text: &str) -> std::vec::Vec<u8> {
+    STANDARD.decode(text).unwrap()
+}
+
+/// DER (what WebAuthn returns) to 64-byte r||s, normalized to low-S as Soroban requires.
+fn low_s(der: &[u8]) -> [u8; 64] {
+    let sig = P256Signature::from_der(der).unwrap();
+    sig.normalize_s().unwrap_or(sig).to_bytes().into()
+}
+
+/// The same signature with s replaced by n - s: valid ECDSA, but high-S.
+fn high_s(der: &[u8]) -> [u8; 64] {
+    let sig = P256Signature::from_slice(&low_s(der)).unwrap();
+    let (r, s) = sig.split_scalars();
+    P256Signature::from_scalars(r.to_bytes(), (-*s).to_bytes()).unwrap().to_bytes().into()
+}
+
+fn rp_hash(env: &Env, rp_id: &str) -> BytesN<32> {
+    env.crypto().sha256(&soroban_sdk::Bytes::from_slice(env, rp_id.as_bytes())).to_bytes()
+}
+
+/// Everything needed to present one assertion to `__check_auth`.
+#[derive(Clone)]
+struct Assertion {
+    payload: [u8; 32],
+    public_key: [u8; 65],
+    authenticator_data: std::vec::Vec<u8>,
+    client_data_json: std::vec::Vec<u8>,
+    sig: [u8; 64],
+}
+
+fn real_assertions() -> std::vec::Vec<Assertion> {
+    let fx = webauthn_fixture();
+    let spki = b64(&fx.spki);
+    let public_key: [u8; 65] = spki[spki.len() - 65..].try_into().unwrap();
+    fx.assertions
+        .iter()
+        .map(|a| Assertion {
+            payload: b64(&a.challenge).try_into().unwrap(),
+            public_key,
+            authenticator_data: b64(&a.authenticator_data),
+            client_data_json: b64(&a.client_data_json),
+            sig: low_s(&b64(&a.signature)),
+        })
+        .collect()
+}
+
+fn passkey_signature(f: &Fixture, a: &Assertion) -> AccSignature {
+    AccSignature::Passkey(PasskeySignature {
+        public_key: BytesN::from_array(&f.env, &a.public_key),
+        authenticator_data: soroban_sdk::Bytes::from_slice(&f.env, &a.authenticator_data),
+        client_data_json: soroban_sdk::Bytes::from_slice(&f.env, &a.client_data_json),
+        sig: BytesN::from_array(&f.env, &a.sig),
+    })
+}
+
+fn register_passkey(f: &Fixture, a: &Assertion, rp_id: &str, valid_until: Option<u32>) {
+    f.env.mock_all_auths();
+    f.client.set_passkey(
+        &BytesN::from_array(&f.env, &a.public_key),
+        &rp_hash(&f.env, rp_id),
+        &valid_until,
+        &vec![&f.env, claim_rule(f)],
+    );
+}
+
+fn passkey_check(f: &Fixture, a: &Assertion, contexts: Vec<Context>) -> CheckResult {
+    check_with(f, passkey_signature(f, a), &BytesN::from_array(&f.env, &a.payload), contexts)
+}
+
+fn passkey_id(f: &Fixture, a: &Assertion) -> SignerId {
+    SignerId::Passkey(BytesN::from_array(&f.env, &a.public_key))
+}
+
+fn first_real() -> Assertion {
+    real_assertions().remove(0)
+}
+
+fn with_client_data(a: &Assertion, edit: impl Fn(std::string::String) -> std::string::String) -> Assertion {
+    let text = std::string::String::from_utf8(a.client_data_json.clone()).unwrap();
+    Assertion { client_data_json: edit(text).into_bytes(), ..a.clone() }
+}
+
+#[test]
+fn real_browser_assertions_authorize_an_allowed_claim() {
+    let f = setup();
+    let all = real_assertions();
+    register_passkey(&f, &all[0], "localhost", None);
+    for a in &all {
+        assert_eq!(passkey_check(&f, a, claim_ctx(&f)), Ok(()));
+    }
+    assert_eq!(all.len(), 32);
+}
+
+#[test]
+fn a_passkey_goes_through_the_same_policy_as_any_delegate() {
+    let f = setup();
+    let a = first_real();
+    register_passkey(&f, &a, "localhost", None);
+    let withdraw = vec![&f.env, call(&f.env, &f.sim, symbol_short!("withdraw"), &f.client.address)];
+    assert_eq!(passkey_check(&f, &a, withdraw), Err(Ok(AccError::NotAllowed)));
+    let other = Address::generate(&f.env);
+    let stranger = vec![&f.env, call(&f.env, &f.sim, symbol_short!("claim"), &other)];
+    assert_eq!(passkey_check(&f, &a, stranger), Err(Ok(AccError::NotAllowed)));
+    let me = f.client.address.clone();
+    let on_self = vec![&f.env, call(&f.env, &me, Symbol::new(&f.env, "set_signer"), &me)];
+    assert_eq!(passkey_check(&f, &a, on_self), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn a_passkey_expires_like_any_delegate() {
+    let f = setup();
+    let a = first_real();
+    register_passkey(&f, &a, "localhost", Some(200));
+    f.env.ledger().set_sequence_number(200);
+    assert_eq!(passkey_check(&f, &a, claim_ctx(&f)), Ok(()));
+    f.env.ledger().set_sequence_number(201);
+    assert_eq!(passkey_check(&f, &a, claim_ctx(&f)), Err(Ok(AccError::SignerExpired)));
+}
+
+#[test]
+fn an_unregistered_passkey_is_refused() {
+    let f = setup();
+    assert_eq!(passkey_check(&f, &first_real(), claim_ctx(&f)), Err(Ok(AccError::UnknownSigner)));
+}
+
+#[test]
+fn a_passkey_is_bound_to_its_relying_party() {
+    let f = setup();
+    let a = first_real();
+    // Registered for another site: an assertion made for localhost must not authorize anything.
+    register_passkey(&f, &a, "example.com", None);
+    assert_eq!(passkey_check(&f, &a, claim_ctx(&f)), Err(Ok(AccError::RpMismatch)));
+}
+
+#[test]
+fn an_assertion_is_for_one_payload_only() {
+    let f = setup();
+    let all = real_assertions();
+    register_passkey(&f, &all[0], "localhost", None);
+    // Another assertion's payload presented with this assertion's signature.
+    let replay = Assertion { payload: all[1].payload, ..all[0].clone() };
+    assert_eq!(passkey_check(&f, &replay, claim_ctx(&f)), Err(Ok(AccError::ChallengeMismatch)));
+}
+
+#[test]
+fn user_presence_and_verification_are_required() {
+    let f = setup();
+    let a = first_real();
+    register_passkey(&f, &a, "localhost", None);
+    let flags = |mask: u8| {
+        let mut data = a.authenticator_data.clone();
+        data[32] &= !mask;
+        Assertion { authenticator_data: data, ..a.clone() }
+    };
+    assert_eq!(passkey_check(&f, &flags(0x01), claim_ctx(&f)), Err(Ok(AccError::UserNotPresent)));
+    assert_eq!(passkey_check(&f, &flags(0x04), claim_ctx(&f)), Err(Ok(AccError::UserNotVerified)));
+    let short = Assertion { authenticator_data: a.authenticator_data[..36].to_vec(), ..a.clone() };
+    assert_eq!(passkey_check(&f, &short, claim_ctx(&f)), Err(Ok(AccError::BadAuthenticatorData)));
+    let long = Assertion { authenticator_data: std::vec![0u8; 513], ..a.clone() };
+    assert_eq!(passkey_check(&f, &long, claim_ctx(&f)), Err(Ok(AccError::BadAuthenticatorData)));
+}
+
+#[test]
+fn the_challenge_must_be_in_its_fixed_place_and_exact() {
+    let f = setup();
+    let a = first_real();
+    register_passkey(&f, &a, "localhost", None);
+    let challenge = std::string::String::from_utf8(a.client_data_json.clone())
+        .unwrap()
+        .split("\"challenge\":\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+    assert_eq!(challenge.len(), 43);
+    let wrong = "A".repeat(43);
+
+    // Fields in another order, so the real challenge is not where the contract looks.
+    let reordered = with_client_data(&a, |_| std::format!("{{\"challenge\":\"{challenge}\",\"type\":\"webauthn.get\"}}"));
+    assert_eq!(passkey_check(&f, &reordered, claim_ctx(&f)), Err(Ok(AccError::BadClientData)));
+
+    // A look-alike: the real challenge appears, but later, behind a wrong one in the real position.
+    let lookalike = with_client_data(&a, |_| {
+        std::format!("{{\"type\":\"webauthn.get\",\"challenge\":\"{wrong}\",\"origin\":\"x\",\"challenge\":\"{challenge}\"}}")
+    });
+    assert_eq!(passkey_check(&f, &lookalike, claim_ctx(&f)), Err(Ok(AccError::ChallengeMismatch)));
+
+    // A longer challenge that starts with the right one.
+    let longer = with_client_data(&a, |_| std::format!("{{\"type\":\"webauthn.get\",\"challenge\":\"{challenge}A\",\"origin\":\"x\"}}"));
+    assert_eq!(passkey_check(&f, &longer, claim_ctx(&f)), Err(Ok(AccError::ChallengeMismatch)));
+
+    // A registration ceremony is not an assertion.
+    let create = with_client_data(&a, |t| t.replace("webauthn.get", "webauthn.cret"));
+    assert_eq!(passkey_check(&f, &create, claim_ctx(&f)), Err(Ok(AccError::BadClientData)));
+
+    assert_eq!(passkey_check(&f, &Assertion { client_data_json: std::vec::Vec::new(), ..a.clone() }, claim_ctx(&f)), Err(Ok(AccError::BadClientData)));
+    let huge = with_client_data(&a, |t| t + &" ".repeat(600));
+    assert_eq!(passkey_check(&f, &huge, claim_ctx(&f)), Err(Ok(AccError::BadClientData)));
+}
+
+#[test]
+fn any_change_to_the_signed_bytes_breaks_the_signature() {
+    let f = setup();
+    let a = first_real();
+    register_passkey(&f, &a, "localhost", None);
+    // The checks pass (challenge and flags intact) but the signature no longer matches, so it traps.
+    let tampered = with_client_data(&a, |t| t.replace("localhost", "localhosx"));
+    let result = passkey_check(&f, &tampered, claim_ctx(&f));
+    assert!(result.is_err() && !matches!(result, Err(Ok(_))), "expected a signature trap, got {result:?}");
+}
+
+#[test]
+fn a_high_s_signature_is_refused() {
+    let f = setup();
+    let a = first_real();
+    register_passkey(&f, &a, "localhost", None);
+    let fixture = webauthn_fixture();
+    let mirrored = Assertion { sig: high_s(&b64(&fixture.assertions[0].signature)), ..a.clone() };
+    assert!(passkey_check(&f, &mirrored, claim_ctx(&f)).is_err());
+}
+
+#[test]
+fn another_key_cannot_sign_for_a_registered_passkey() {
+    let f = setup();
+    let a = first_real();
+    register_passkey(&f, &a, "localhost", None);
+
+    // An attacker builds a perfectly valid assertion with their own key, but presents the victim's public key.
+    let attacker = P256Key::from_slice(&[9u8; 32]).unwrap();
+    let rp = rp_hash(&f.env, "localhost").to_array();
+    let mut auth = std::vec::Vec::from(rp);
+    auth.extend([0x05, 0, 0, 0, 1]);
+    let challenge = STANDARD.encode(a.payload).replace('+', "-").replace('/', "_").trim_end_matches('=').to_string();
+    let client = std::format!("{{\"type\":\"webauthn.get\",\"challenge\":\"{challenge}\",\"origin\":\"http://localhost\"}}").into_bytes();
+    let digest = {
+        let mut signed = auth.clone();
+        signed.extend(Sha256::digest(&client));
+        Sha256::digest(&signed)
+    };
+    let sig: P256Signature = attacker.sign_prehash(&digest).unwrap();
+    let forged = Assertion { authenticator_data: auth, client_data_json: client, sig: sig.normalize_s().unwrap_or(sig).to_bytes().into(), ..a };
+    let result = passkey_check(&f, &forged, claim_ctx(&f));
+    assert!(result.is_err() && !matches!(result, Err(Ok(_))), "expected a signature trap, got {result:?}");
+}
+
+#[test]
+fn passkey_policy_admin() {
+    let f = setup();
+    let a = first_real();
+    let key = BytesN::from_array(&f.env, &a.public_key);
+
+    // Master-only.
+    let rules = vec![&f.env, claim_rule(&f)];
+    assert!(f.client.try_set_passkey(&key, &rp_hash(&f.env, "localhost"), &None, &rules).is_err());
+
+    // A passkey cannot be registered through set_signer, which has no relying party to bind it to.
+    f.env.mock_all_auths();
+    assert_eq!(f.client.try_set_signer(&passkey_id(&f, &a), &None, &rules), Err(Ok(AccError::InvalidPolicy)));
+
+    f.client.set_passkey(&key, &rp_hash(&f.env, "localhost"), &Some(500), &rules);
+    let policy = f.client.get_signer(&passkey_id(&f, &a)).unwrap();
+    assert_eq!(policy.rp_id_hash, Some(rp_hash(&f.env, "localhost")));
+    assert_eq!(policy.valid_until_ledger, Some(500));
+    assert_eq!(f.client.list_signers(), vec![&f.env, passkey_id(&f, &a)]);
+
+    // Editing the rules or the expiry keeps the relying party binding.
+    f.client.set_expiry(&passkey_id(&f, &a), &Some(900));
+    f.client.add_rule(
+        &passkey_id(&f, &a),
+        &Rule { contract: f.sim.clone(), function: symbol_short!("ping"), args: Vec::new(&f.env) },
+    );
+    let edited = f.client.get_signer(&passkey_id(&f, &a)).unwrap();
+    assert_eq!(edited.rp_id_hash, Some(rp_hash(&f.env, "localhost")));
+    assert_eq!(edited.valid_until_ledger, Some(900));
+    assert_eq!(edited.rules.len(), 2);
+
+    // Rules on the account itself are refused here too, and a passkey can be revoked.
+    let on_self = Rule { contract: f.client.address.clone(), function: symbol_short!("x"), args: Vec::new(&f.env) };
+    assert_eq!(
+        f.client.try_set_passkey(&key, &rp_hash(&f.env, "localhost"), &None, &vec![&f.env, on_self]),
+        Err(Ok(AccError::InvalidPolicy))
+    );
+    f.client.revoke_signer(&passkey_id(&f, &a));
+    assert_eq!(passkey_check(&f, &a, claim_ctx(&f)), Err(Ok(AccError::UnknownSigner)));
+}
+
+#[test]
+fn an_ed25519_delegate_and_a_passkey_do_not_share_a_policy() {
+    let f = setup();
+    let a = first_real();
+    allow_delegate_claim(&f);
+    // The passkey is not registered, whatever the ed25519 delegate may do.
+    assert_eq!(delegate_claims(&f), Ok(()));
+    assert_eq!(passkey_check(&f, &a, claim_ctx(&f)), Err(Ok(AccError::UnknownSigner)));
 }

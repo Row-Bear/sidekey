@@ -19,6 +19,8 @@ import {
   summarizePreimage,
 } from "../src/broker.ts";
 import { sep53Digest, walletMessage } from "../src/wallet.ts";
+import { readFileSync } from "node:fs";
+import { publicKeyFromSpki, rpIdHash } from "../src/passkey.ts";
 
 const ACCOUNT = "CAMKCCLKP5HVC4BECOV4JAGPHED4UABO2PPMR5DL5HQO2XNLK5NMV3MT";
 const SIM = "CDGOE4WK2MAL2U2VFIFPVGIAWNZU5A2KJ5FJTJ7GMXVNS2GGWK4N33DL";
@@ -334,5 +336,124 @@ describe("transaction requests (a wallet signs a whole transaction)", () => {
     const [next] = broker.pending();
     broker.cancel(next.id, "No");
     await assert.rejects(second, SigningCancelled);
+  });
+});
+
+describe("passkey requests (a WebAuthn assertion answers)", () => {
+  const fx = JSON.parse(
+    readFileSync(new URL("../../../contracts/smart-account/test-fixtures/webauthn-assertions.json", import.meta.url), "utf8"),
+  ) as { spki: string; assertions: { challenge: string; authenticatorData: string; clientDataJSON: string; signature: string }[] };
+  const passkey = publicKeyFromSpki(Buffer.from(fx.spki, "base64"));
+  const rp = rpIdHash("localhost");
+  const [one, two] = fx.assertions;
+  const payloadOf = (a: typeof one) => Buffer.from(a.challenge, "base64");
+  const answer = (a: typeof one, edit: Partial<{ authenticatorData: string; clientDataJson: string; signature: string }> = {}) => ({
+    kind: "passkey" as const,
+    authenticatorData: a.authenticatorData,
+    clientDataJson: a.clientDataJSON,
+    signature: a.signature,
+    ...edit,
+  });
+
+  const ask = (broker: SignatureBroker, payload = payloadOf(one), rpIdHashValue = rp) =>
+    broker.request({
+      account: ACCOUNT,
+      signerRaw: passkey,
+      rpIdHash: rpIdHashValue,
+      signerLabel: "delegate",
+      preimageXdr: "AAAA",
+      payload,
+      summary: ["claim(x) on y"],
+    });
+
+  it("shows the passkey as a signer, takes a real assertion and returns the contract's Passkey signature", async () => {
+    const broker = new SignatureBroker();
+    const job = ask(broker);
+    const [pending] = broker.pending();
+    assert.equal(pending.signer.kind, "passkey");
+    assert.equal(pending.signer.id, passkey.toString("hex"));
+    assert.equal(pending.kind === "auth-entry" && pending.payloadHex, payloadOf(one).toString("hex"));
+
+    assert.deepEqual(broker.submit(pending.id, answer(one)), { ok: true });
+    const [kind, body] = scValToNative(await job) as [string, Record<string, Uint8Array>];
+    assert.equal(kind, "Passkey");
+    assert.equal(Buffer.from(body.public_key).toString("hex"), passkey.toString("hex"));
+    assert.equal(body.sig.length, 64, "the DER signature is converted to compact r||s");
+  });
+
+  it("accepts every real assertion, whether the authenticator's s was high or low", async () => {
+    for (const a of fx.assertions) {
+      const broker = new SignatureBroker();
+      const job = ask(broker, payloadOf(a));
+      assert.equal(broker.submit(broker.pending()[0].id, answer(a)).ok, true);
+      await job;
+    }
+  });
+
+  it("refuses an assertion for another request, another site, or without verification, and keeps waiting", async () => {
+    const broker = new SignatureBroker();
+    void ask(broker).catch(() => {});
+    const [{ id }] = broker.pending();
+    const refused = (response: Parameters<SignatureBroker["submit"]>[1], pattern: RegExp) => {
+      const result = broker.submit(id, response);
+      assert.equal(result.ok, false);
+      assert.match(result.ok === false ? result.message : "", pattern);
+    };
+    refused(answer(two), /challenge does not match/);
+    const data = Buffer.from(one.authenticatorData, "base64");
+    data[32] &= ~0x04;
+    refused(answer(one, { authenticatorData: data.toString("base64") }), /verify the user/);
+    data[0] ^= 1;
+    refused(answer(one, { authenticatorData: data.toString("base64") }), /different site/);
+    const json = Buffer.from(one.clientDataJSON, "base64").toString().replace("localhost", "localhosx");
+    refused(answer(one, { clientDataJson: Buffer.from(json).toString("base64") }), /not .*passkey signature/);
+    refused(answer(one, { signature: "AAAA" }), /Malformed/);
+    refused(answer(one, { signature: "" }), /Malformed/);
+    refused({ kind: "passkey", authenticatorData: "!!", clientDataJson: "!!", signature: "!!" }, /./);
+    assert.equal(broker.pending().length, 1);
+    broker.cancel(id);
+  });
+
+  it("refuses another passkey's signature even when everything else is right", async () => {
+    const broker = new SignatureBroker();
+    void ask(broker).catch(() => {});
+    const [{ id }] = broker.pending();
+    // The assertion is valid, but the request is for a different public key.
+    const otherKey = Buffer.from(passkey);
+    otherKey[20] ^= 1;
+    const second = new SignatureBroker();
+    void second
+      .request({ account: ACCOUNT, signerRaw: otherKey, rpIdHash: rp, signerLabel: "delegate", preimageXdr: "AAAA", payload: payloadOf(one), summary: [] })
+      .catch(() => {});
+    const result = second.submit(second.pending()[0].id, answer(one));
+    assert.equal(result.ok, false);
+    broker.cancel(id);
+    second.cancel(second.pending()[0].id);
+  });
+
+  it("does not mix passkey and key requests", async () => {
+    const broker = new SignatureBroker();
+    void ask(broker).catch(() => {});
+    void request(broker).catch(() => {});
+    const [passkeyRequest, keyRequest] = broker.pending();
+    const keyToPasskey = broker.submit(passkeyRequest.id, { kind: "payload", signature: b64(master.sign(PAYLOAD)) });
+    assert.equal(keyToPasskey.ok, false);
+    assert.match(keyToPasskey.ok === false ? keyToPasskey.message : "", /is a passkey: it must answer with a passkey assertion/);
+    const passkeyToKey = broker.submit(keyRequest.id, answer(one));
+    assert.equal(passkeyToKey.ok, false);
+    assert.match(passkeyToKey.ok === false ? passkeyToKey.message : "", /is a key, not a passkey/);
+    assert.equal(broker.pending().length, 2);
+    broker.cancel(passkeyRequest.id);
+    broker.cancel(keyRequest.id);
+  });
+
+  it("needs the relying party hash, and is single use", async () => {
+    const broker = new SignatureBroker();
+    assert.throws(() => broker.request({ account: ACCOUNT, signerRaw: passkey, signerLabel: "d", preimageXdr: "AAAA", payload: PAYLOAD, summary: [] }), /relying party/);
+    const job = ask(broker);
+    const [{ id }] = broker.pending();
+    assert.equal(broker.submit(id, answer(one)).ok, true);
+    await job;
+    assert.equal(broker.submit(id, answer(one)).ok, false);
   });
 });

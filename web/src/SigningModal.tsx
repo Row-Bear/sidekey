@@ -94,6 +94,9 @@ export function SigningModal({ request, signers, onDone }: { request: PendingSig
           </div>
         )}
 
+        {request.signer.kind === "passkey" ? (
+          <p className="muted small">This signature comes from the passkey on your device; it cannot be produced by hand.</p>
+        ) : (
         <details open={automatic.length === 0}>
           <summary>Sign manually</summary>
           <p className="muted small">
@@ -141,6 +144,7 @@ export function SigningModal({ request, signers, onDone }: { request: PendingSig
             </button>
           </div>
         </details>
+        )}
 
         {error && <p className="error small">{error}</p>}
 

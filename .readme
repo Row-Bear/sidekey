@@ -144,6 +144,22 @@ approved; the signing dialog in the dashboard lists the exact calls first.
 **Not yet tried with the real xBull extension** (tested with test wallets that copy its behaviour). See the manual
 check in [STRETCH_PLAN.md](STRETCH_PLAN.md) under WP4.
 
+## Passkey delegate
+
+The delegate can be a **passkey** (WebAuthn) instead of the demo's key. In the **Delegate signer** panel:
+
+1. **Create passkey**: your browser or device creates a P-256 key (fingerprint, PIN or security key). Only the
+   public key and credential id are stored, in `wallet-session.json` (gitignored). It is tied to the site you
+   opened (`localhost`), so use the dashboard at the same address afterwards.
+2. Switch the delegate to **Passkey**. It applies to the next smart account, so run **Run full demo** (or
+   **New account only**).
+3. Every delegate step now asks for your device. The smart account itself verifies the WebAuthn signature
+   (`secp256r1`), and the same policy and expiry rules apply: `claim()` works, `withdraw()` is refused with
+   `NotAllowed (#3)`, and after expiry the passkey is refused with `SignerExpired (#5)`.
+
+Tested with a Chrome virtual authenticator; not yet with a real device. Switch back with **Demo key**. The CLI
+runner (`npm run poc`) always uses the demo's delegate key.
+
 ## Repository layout
 
 ```
@@ -160,8 +176,9 @@ PLAN.md                    development plan and status
 
 This is a hackathon PoC, not audited, and testnet only.
 
-- One master key with no rotation or recovery; ed25519 signatures only. A wallet master is signed through the
-  wallet; the delegate key is still held by the demo.
+- One master key with no rotation or recovery; the master is ed25519 (a demo key or a wallet). The delegate is
+  ed25519 held by the demo, or a passkey that never leaves your device. Passkey verification is custom code
+  and has not been audited.
 - Policy is an allowlist with per-signer expiry and per-argument constraints; there are
   no spend limits or rate limits.
 - The contract extends its own storage lifetime to about 30 days on deploy and on

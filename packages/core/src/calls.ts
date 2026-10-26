@@ -15,7 +15,7 @@ import {
   signerIdScVal,
   type SignerPolicyView,
 } from "./policy.js";
-import { latestLedger, LEDGERS_PER_MINUTE, type ScenarioContext } from "./scenario.js";
+import { delegateKey, latestLedger, LEDGERS_PER_MINUTE, type ScenarioContext } from "./scenario.js";
 import { argKind, describeFunctions, encodeArg, encodeArgs, loadSpec } from "./spec.js";
 
 // What the dashboard's policy editor and call builder do on the server: list signers, preview a
@@ -24,14 +24,15 @@ import { argKind, describeFunctions, encodeArg, encodeArgs, loadSpec } from "./s
 const POLICY_ERRORS = ["NotAllowed", "SignerExpired", "UnknownSigner"];
 
 export interface SignerView {
-  /** "master", or the hex of the signer's raw ed25519 public key. */
+  /** "master", or the hex of the signer's raw public key (32 bytes ed25519, 65 bytes passkey). */
   id: string;
   label: "master" | "delegate" | "other";
-  /** The signer's G address. */
+  kind: "ed25519" | "passkey";
+  /** The signer's G address; for a passkey, a short readable name. */
   address: string;
   /** True when this demo holds the key and can sign for it. */
   hasKey: boolean;
-  /** True when this signer's signatures always come from the browser (a connected wallet master). */
+  /** True when this signer's signatures always come from the browser (a wallet master, or a passkey). */
   viaBrowser: boolean;
   registered: boolean;
   /** Null for the master (no rules) and for signers that are not registered. */
@@ -43,11 +44,17 @@ export interface SignerView {
  * provider (wallet, passkey) returns authorizers that ask the browser instead.
  */
 /** Returns null to let the demo sign with a key it holds. */
-export type SigningSource = (signer: { id: string; label: string; raw: Uint8Array }) => Authorizer[] | null;
+export type SigningSource = (signer: {
+  id: string;
+  label: string;
+  raw: Uint8Array;
+  /** For a passkey: sha256 of its relying party id, read from the account's policy. */
+  rpIdHash?: Uint8Array;
+}) => Authorizer[] | null;
 
 const hexOf = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
 
-/** Accepts "master", a G address, or 64 hex characters. */
+/** Accepts "master", a G address, or hex: 64 characters (ed25519) or 130 (a passkey). */
 function parseSigner(ref: string): { id: string; raw: Uint8Array | null } {
   const text = ref.trim();
   if (text === "master") return { id: "master", raw: null };
@@ -55,8 +62,8 @@ function parseSigner(ref: string): { id: string; raw: Uint8Array | null } {
     const raw = StrKey.decodeEd25519PublicKey(text);
     return { id: hexOf(raw), raw };
   }
-  if (/^[0-9a-fA-F]{64}$/.test(text)) return { id: text.toLowerCase(), raw: Buffer.from(text, "hex") };
-  throw new Error(`"${text}" is not "master", a G address or a 64-character hex key`);
+  if (/^([0-9a-fA-F]{64}|04[0-9a-fA-F]{128})$/.test(text)) return { id: text.toLowerCase(), raw: Buffer.from(text, "hex") };
+  throw new Error(`"${text}" is not "master", a G address or a 64-character (key) or 130-character (passkey) hex key`);
 }
 
 async function readPolicy(ctx: ScenarioContext, raw: Uint8Array): Promise<SignerPolicyView | null> {
@@ -64,25 +71,31 @@ async function readPolicy(ctx: ScenarioContext, raw: Uint8Array): Promise<Signer
   return native ? parseSignerPolicy(native) : null;
 }
 
-/** The master, every signer registered on the account, and the demo delegate even before it is registered. */
+/** A short readable name for a public key: the G address, or `passkey 1a2b3c4d…`. */
+const nameOf = (raw: Uint8Array): string =>
+  raw.length === 65 ? `passkey ${hexOf(raw).slice(2, 10)}…` : StrKey.encodeEd25519PublicKey(Buffer.from(raw));
+
+/** The master, every signer registered on the account, and the delegate even before it is registered. */
 export async function listSigners(ctx: ScenarioContext): Promise<SignerView[]> {
-  const delegateRaw = ctx.delegate.rawPublicKey();
+  const delegate = delegateKey(ctx);
+  const heldKey = hexOf(ctx.delegate.rawPublicKey());
   const registered = ((await read(ctx, ctx.smartAccountId, "list_signers")) as [string, Uint8Array][]).map(([, key]) => key);
   const rawKeys = [...registered];
-  if (!rawKeys.some((k) => hexOf(k) === hexOf(delegateRaw))) rawKeys.push(delegateRaw);
+  if (!rawKeys.some((k) => hexOf(k) === hexOf(delegate))) rawKeys.push(delegate);
 
   const signers: SignerView[] = [
-    { id: "master", label: "master", address: ctx.master.publicKey(), hasKey: !ctx.walletMaster, viaBrowser: ctx.walletMaster, registered: true, policy: null },
+    { id: "master", label: "master", kind: "ed25519", address: ctx.master.publicKey(), hasKey: !ctx.walletMaster, viaBrowser: ctx.walletMaster, registered: true, policy: null },
   ];
   for (const raw of rawKeys) {
-    const isDelegate = hexOf(raw) === hexOf(delegateRaw);
     const policy = await readPolicy(ctx, raw);
     signers.push({
       id: hexOf(raw),
-      label: isDelegate ? "delegate" : "other",
-      address: StrKey.encodeEd25519PublicKey(Buffer.from(raw)),
-      hasKey: isDelegate,
-      viaBrowser: false,
+      label: hexOf(raw) === hexOf(delegate) ? "delegate" : "other",
+      kind: raw.length === 65 ? "passkey" : "ed25519",
+      address: nameOf(raw),
+      // The demo holds only its own delegate key; a passkey stays in the browser.
+      hasKey: hexOf(raw) === heldKey,
+      viaBrowser: raw.length === 65,
       registered: policy !== null,
       policy,
     });
@@ -97,7 +110,7 @@ function keyFor(ctx: ScenarioContext, id: string): Keypair | null {
 }
 
 const labelFor = (ctx: ScenarioContext, id: string) =>
-  id === "master" ? "master" : id === hexOf(ctx.delegate.rawPublicKey()) ? "delegate" : `${id.slice(0, 8)}…`;
+  id === "master" ? "master" : id === hexOf(delegateKey(ctx)) ? "delegate" : `${id.slice(0, 8)}…`;
 
 function authorizersFor(ctx: ScenarioContext, id: string, key: Keypair): Authorizer[] {
   const authorizers: Authorizer[] = [{ kind: "smart", address: ctx.smartAccountId, keypair: key }];
@@ -213,7 +226,14 @@ function failure(base: Pick<CallRecord, "kind" | "title" | "signer">, message: s
 export async function runCall(ctx: ScenarioContext, req: CallRequest, signing?: SigningSource): Promise<CallRecord> {
   const signer = parseSigner(req.signer);
   const base = { kind: "call" as const, title: `${req.function}(${req.args.join(", ")})`, signer: labelFor(ctx, signer.id) };
-  const asked = signing?.({ id: signer.id, label: base.signer, raw: signer.raw ?? ctx.master.rawPublicKey() }) ?? null;
+  // A passkey is verified against the relying party recorded in the account's policy.
+  let rpIdHash: Uint8Array | undefined;
+  if (signer.raw?.length === 65) {
+    const policy = await readPolicy(ctx, signer.raw);
+    if (!policy?.rpIdHashHex) return failure(base, "That passkey is not registered on the account yet", "signing");
+    rpIdHash = Buffer.from(policy.rpIdHashHex, "hex");
+  }
+  const asked = signing?.({ id: signer.id, label: base.signer, raw: signer.raw ?? ctx.master.rawPublicKey(), rpIdHash }) ?? null;
   const key = asked ? null : keyFor(ctx, signer.id);
   if (!asked && !key) {
     return failure(
@@ -324,7 +344,20 @@ export async function runPolicyOp(ctx: ScenarioContext, op: PolicyOp, signing?: 
       case "allow": {
         const rule = await buildRule(ctx, op);
         const existing = await readPolicy(ctx, signer.raw);
-        if (existing === null) {
+        if (existing === null && signer.raw.length === 65) {
+          // A passkey is registered with the relying party it belongs to; only the dashboard's own passkey is known.
+          const passkey = ctx.delegatePasskey;
+          if (!passkey || hexOf(passkey.publicKey) !== hexOf(signer.raw)) {
+            throw new Error("Only the passkey created in this dashboard can be registered");
+          }
+          method = "set_passkey";
+          args = [
+            xdr.ScVal.scvBytes(Buffer.from(passkey.publicKey)),
+            xdr.ScVal.scvBytes(Buffer.from(passkey.rpIdHash)),
+            optionLedgerScVal(await resolveExpiry(ctx, op.expiry)),
+            rulesScVal([rule]),
+          ];
+        } else if (existing === null) {
           method = "set_signer";
           args = [signerId, optionLedgerScVal(await resolveExpiry(ctx, op.expiry)), rulesScVal([rule])];
         } else {

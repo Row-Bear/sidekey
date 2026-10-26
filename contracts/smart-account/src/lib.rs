@@ -28,6 +28,8 @@ enum DataKey {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SignerId {
     Ed25519(BytesN<32>),
+    /// A WebAuthn passkey: the uncompressed secp256r1 public key (0x04 || x || y).
+    Passkey(BytesN<65>),
 }
 
 /// What a rule requires of one call argument.
@@ -58,6 +60,8 @@ pub struct SignerPolicy {
     /// Last ledger (inclusive) in which this signer is accepted; `None` means no expiry.
     /// Separate from the host's per-signature `signatureExpirationLedger`.
     pub valid_until_ledger: Option<u32>,
+    /// SHA-256 of the WebAuthn relying party id this passkey is bound to; always set for passkeys.
+    pub rp_id_hash: Option<BytesN<32>>,
     pub rules: Vec<Rule>,
 }
 
@@ -65,6 +69,17 @@ pub struct SignerPolicy {
 #[derive(Clone)]
 pub struct Ed25519Signature {
     pub signer: BytesN<32>,
+    pub sig: BytesN<64>,
+}
+
+/// A WebAuthn assertion: what `navigator.credentials.get` returns, with the signature as 64-byte
+/// `r || s` in low-S form (the host rejects high-S).
+#[contracttype]
+#[derive(Clone)]
+pub struct PasskeySignature {
+    pub public_key: BytesN<65>,
+    pub authenticator_data: Bytes,
+    pub client_data_json: Bytes,
     pub sig: BytesN<64>,
 }
 
@@ -76,6 +91,8 @@ pub enum AccSignature {
     /// A SEP-53 message signature, for wallets that cannot sign auth entries but can sign messages:
     /// the signed text is `"Stellar Signed Message:\nAuthorize <this account> payload <hex payload>"`.
     Message(Ed25519Signature),
+    /// A passkey assertion over the authorization payload, for a delegate registered with `set_passkey`.
+    Passkey(PasskeySignature),
 }
 
 #[contracterror]
@@ -87,6 +104,12 @@ pub enum AccError {
     NotAllowed = 3,
     InvalidPolicy = 4,
     SignerExpired = 5,
+    BadAuthenticatorData = 6,
+    RpMismatch = 7,
+    UserNotPresent = 8,
+    UserNotVerified = 9,
+    BadClientData = 10,
+    ChallengeMismatch = 11,
 }
 
 #[contract]
@@ -116,10 +139,31 @@ impl SmartAccount {
         rules: Vec<Rule>,
     ) -> Result<(), AccError> {
         env.current_contract_address().require_auth();
+        // A passkey must be bound to a relying party, which only `set_passkey` records.
+        if matches!(signer, SignerId::Passkey(_)) {
+            return Err(AccError::InvalidPolicy);
+        }
         Self::ensure_not_master(&env, &signer)?;
         Self::validate_expiry(&env, valid_until_ledger)?;
         Self::validate_rules(&env, &rules)?;
-        Self::store(&env, &signer, &SignerPolicy { valid_until_ledger, rules });
+        Self::store(&env, &signer, &SignerPolicy { valid_until_ledger, rp_id_hash: None, rules });
+        Ok(())
+    }
+
+    /// Creates or replaces a passkey delegate: its public key, the relying party it is bound to
+    /// (sha256 of the rp id, e.g. "localhost"), its expiry and its rules. Master-only.
+    pub fn set_passkey(
+        env: Env,
+        public_key: BytesN<65>,
+        rp_id_hash: BytesN<32>,
+        valid_until_ledger: Option<u32>,
+        rules: Vec<Rule>,
+    ) -> Result<(), AccError> {
+        env.current_contract_address().require_auth();
+        Self::validate_expiry(&env, valid_until_ledger)?;
+        Self::validate_rules(&env, &rules)?;
+        let policy = SignerPolicy { valid_until_ledger, rp_id_hash: Some(rp_id_hash), rules };
+        Self::store(&env, &SignerId::Passkey(public_key), &policy);
         Ok(())
     }
 
@@ -201,9 +245,11 @@ impl SmartAccount {
     }
 
     fn ensure_not_master(env: &Env, signer: &SignerId) -> Result<(), AccError> {
-        let SignerId::Ed25519(key) = signer;
-        if *key == Self::master(env.clone()) {
-            return Err(AccError::InvalidPolicy);
+        // The master is an ed25519 key; a passkey can never be it.
+        if let SignerId::Ed25519(key) = signer {
+            if *key == Self::master(env.clone()) {
+                return Err(AccError::InvalidPolicy);
+            }
         }
         Ok(())
     }
@@ -267,6 +313,81 @@ fn message_digest(env: &Env, payload: &BytesN<32>) -> BytesN<32> {
     env.crypto().sha256(&Bytes::from_slice(env, &text)).to_bytes()
 }
 
+// ---- WebAuthn assertion checks ----
+
+const MAX_AUTHENTICATOR_DATA: u32 = 512;
+const MAX_CLIENT_DATA: usize = 512;
+const AUTH_DATA_MIN: u32 = 37;
+const FLAG_USER_PRESENT: u8 = 0x01;
+const FLAG_USER_VERIFIED: u8 = 0x04;
+// The WebAuthn spec fixes the serialization of clientDataJSON: `type` first, then `challenge`.
+const CLIENT_DATA_HEAD: &[u8] = b"{\"type\":\"webauthn.get\",\"challenge\":\"";
+const CHALLENGE_LEN: usize = 43;
+
+const B64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/// Unpadded base64url of 32 bytes (43 characters).
+fn base64url_32(input: &[u8; 32]) -> [u8; CHALLENGE_LEN] {
+    let mut out = [0u8; CHALLENGE_LEN];
+    let mut at = 0;
+    for chunk in input.chunks(3) {
+        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        let chars = match chunk.len() {
+            3 => 4,
+            2 => 3,
+            _ => 2,
+        };
+        for i in 0..chars {
+            out[at] = B64URL[((n >> (18 - 6 * i)) & 63) as usize];
+            at += 1;
+        }
+    }
+    out
+}
+
+/// Checks a WebAuthn assertion against the passkey's relying party and the payload being authorized,
+/// then verifies its signature. Traps on an invalid or high-S signature.
+fn verify_passkey(env: &Env, rp_id_hash: &BytesN<32>, payload: &BytesN<32>, sig: &PasskeySignature) -> Result<(), AccError> {
+    let auth = &sig.authenticator_data;
+    if auth.len() < AUTH_DATA_MIN || auth.len() > MAX_AUTHENTICATOR_DATA {
+        return Err(AccError::BadAuthenticatorData);
+    }
+    let mut rp = [0u8; 32];
+    auth.slice(0..32).copy_into_slice(&mut rp);
+    if rp != rp_id_hash.to_array() {
+        return Err(AccError::RpMismatch);
+    }
+    let flags = auth.get(32).unwrap();
+    if flags & FLAG_USER_PRESENT == 0 {
+        return Err(AccError::UserNotPresent);
+    }
+    if flags & FLAG_USER_VERIFIED == 0 {
+        return Err(AccError::UserNotVerified);
+    }
+
+    let len = sig.client_data_json.len() as usize;
+    if len < CLIENT_DATA_HEAD.len() + CHALLENGE_LEN + 1 || len > MAX_CLIENT_DATA {
+        return Err(AccError::BadClientData);
+    }
+    let mut json = [0u8; MAX_CLIENT_DATA];
+    sig.client_data_json.copy_into_slice(&mut json[..len]);
+    // The challenge must be right after the type, so no other field can carry a look-alike.
+    let head = CLIENT_DATA_HEAD.len();
+    if json[..head] != *CLIENT_DATA_HEAD {
+        return Err(AccError::BadClientData);
+    }
+    if json[head..head + CHALLENGE_LEN] != base64url_32(&payload.to_array()) || json[head + CHALLENGE_LEN] != b'"' {
+        return Err(AccError::ChallengeMismatch);
+    }
+
+    let client_hash = env.crypto().sha256(&sig.client_data_json);
+    let mut signed = sig.authenticator_data.clone();
+    signed.append(&Bytes::from(client_hash.to_bytes()));
+    let digest = env.crypto().sha256(&signed);
+    env.crypto().secp256r1_verify(&sig.public_key, &digest, &sig.sig);
+    Ok(())
+}
+
 fn rule_allows(env: &Env, me: &Address, rule: &Rule, call: &ContractContext) -> bool {
     if rule.contract != call.contract || rule.function != call.fn_name || rule.args.len() != call.args.len() {
         return false;
@@ -296,20 +417,24 @@ impl CustomAccountInterface for SmartAccount {
         signature: AccSignature,
         auth_contexts: Vec<Context>,
     ) -> Result<(), AccError> {
-        // Traps on an invalid signature.
-        let signature = match signature {
+        // Authenticate first; each arm yields who signed. Invalid signatures trap.
+        let signer = match signature {
             AccSignature::Ed25519(signature) => {
-                env.crypto().ed25519_verify(
-                    &signature.signer,
-                    &signature_payload.to_bytes().into(),
-                    &signature.sig,
-                );
-                signature
+                env.crypto().ed25519_verify(&signature.signer, &signature_payload.to_bytes().into(), &signature.sig);
+                signature.signer
             }
             AccSignature::Message(signature) => {
                 let digest = message_digest(&env, &signature_payload.to_bytes());
                 env.crypto().ed25519_verify(&signature.signer, &digest.into(), &signature.sig);
-                signature
+                signature.signer
+            }
+            AccSignature::Passkey(signature) => {
+                // A passkey is only ever a delegate: its policy says which relying party it belongs to.
+                let id = SignerId::Passkey(signature.public_key.clone());
+                let policy = Self::policy_of(&env, &id).ok_or(AccError::UnknownSigner)?;
+                let rp_id_hash = policy.rp_id_hash.clone().ok_or(AccError::InvalidPolicy)?;
+                verify_passkey(&env, &rp_id_hash, &signature_payload.to_bytes(), &signature)?;
+                return Self::authorize(&env, policy, auth_contexts);
             }
         };
 
@@ -318,20 +443,24 @@ impl CustomAccountInterface for SmartAccount {
             .instance()
             .get(&DataKey::Master)
             .ok_or(AccError::NotInitialized)?;
-        if signature.signer == master {
+        if signer == master {
             return Ok(());
         }
+        let policy = Self::policy_of(&env, &SignerId::Ed25519(signer)).ok_or(AccError::UnknownSigner)?;
+        Self::authorize(&env, policy, auth_contexts)
+    }
+}
 
-        let policy = Self::policy_of(&env, &SignerId::Ed25519(signature.signer)).ok_or(AccError::UnknownSigner)?;
+impl SmartAccount {
+    /// A delegate's policy: not expired, and every invocation in the authorized tree (root and
+    /// sub-invocations) matches one of its rules. Anything else fails closed.
+    fn authorize(env: &Env, policy: SignerPolicy, auth_contexts: Vec<Context>) -> Result<(), AccError> {
         if let Some(last_valid_ledger) = policy.valid_until_ledger {
             if env.ledger().sequence() > last_valid_ledger {
                 return Err(AccError::SignerExpired);
             }
         }
         let me = env.current_contract_address();
-
-        // Every invocation in the authorized tree (root and sub-invocations)
-        // must match a rule; anything else fails closed.
         for context in auth_contexts.iter() {
             let call = match context {
                 Context::Contract(call) => call,
@@ -340,7 +469,7 @@ impl CustomAccountInterface for SmartAccount {
             if call.contract == me {
                 return Err(AccError::NotAllowed);
             }
-            if !policy.rules.iter().any(|rule| rule_allows(&env, &me, &rule, &call)) {
+            if !policy.rules.iter().any(|rule| rule_allows(env, &me, &rule, &call)) {
                 return Err(AccError::NotAllowed);
             }
         }

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Keypair, StrKey, Transaction, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
 import { type Authorizer, flattenInvocation } from "./chain.js";
-import { type CallContext, describeCall, ed25519SignatureScVal, messageSignatureScVal } from "./policy.js";
+import { checkAssertion, derToCompactLowS, verifyPasskeySignature } from "./passkey.js";
+import { type CallContext, describeCall, ed25519SignatureScVal, messageSignatureScVal, passkeySignatureScVal } from "./policy.js";
 import { decodeWalletSignature, sep53Digest, walletMessage } from "./wallet.js";
 
 // The signature broker. A server-side job needs a signature that only the browser can produce (a
@@ -17,13 +18,22 @@ export type SignatureResponse =
   /** ed25519 signature over the SEP-53 digest of `message`: what a wallet's `signMessage` returns. */
   | { kind: "message"; signature: string }
   /** The same transaction, signed: what a wallet's `signTransaction` returns. */
-  | { kind: "transaction"; signedXdr: string };
+  | { kind: "transaction"; signedXdr: string }
+  /** A WebAuthn assertion (base64 each; the signature is the authenticator's DER). */
+  | { kind: "passkey"; authenticatorData: string; clientDataJson: string; signature: string };
 
 interface PendingBase {
   id: string;
   createdAt: string;
   expiresAt: string;
-  signer: { label: string; /** hex of the raw ed25519 key */ id: string; address: string };
+  signer: {
+    label: string;
+    kind: "ed25519" | "passkey";
+    /** Hex of the raw public key: 32 bytes for ed25519, 65 for a passkey. */
+    id: string;
+    /** The G address of an ed25519 signer; for a passkey, a short readable name. */
+    address: string;
+  };
   /** What is being authorized, one line per invocation (root and nested). */
   summary: string[];
 }
@@ -64,7 +74,10 @@ export class SigningCancelled extends Error {
 
 export interface BrokerRequest {
   account: string;
+  /** The signer's public key: 32 bytes (ed25519) or 65 (a passkey, which also needs `rpIdHash`). */
   signerRaw: Uint8Array;
+  /** For a passkey: sha256 of the relying party id it is bound to (from the account's policy). */
+  rpIdHash?: Uint8Array;
   signerLabel: string;
   preimageXdr: string;
   payload: Uint8Array;
@@ -101,7 +114,9 @@ export class SignatureBroker {
 
   /** Waits for the browser to sign an auth entry. Rejects on cancel or timeout; resolves at most once. */
   request(req: BrokerRequest): Promise<xdr.ScVal> {
-    const key = Keypair.fromPublicKey(StrKey.encodeEd25519PublicKey(Buffer.from(req.signerRaw)));
+    const isPasskey = req.signerRaw.length === 65;
+    if (isPasskey && !req.rpIdHash) throw new Error("A passkey request needs the relying party hash");
+    const key = isPasskey ? null : Keypair.fromPublicKey(StrKey.encodeEd25519PublicKey(Buffer.from(req.signerRaw)));
     const message = walletMessage(req.account, req.payload);
     return this.enqueue<xdr.ScVal>(
       req,
@@ -114,15 +129,30 @@ export class SignatureBroker {
         preimageXdr: req.preimageXdr,
       }),
       (response) => {
+        if (response.kind === "passkey") {
+          if (!isPasskey) throw new Error(`${req.signerLabel} is a key, not a passkey`);
+          const assertion = {
+            authenticatorData: Buffer.from(response.authenticatorData, "base64"),
+            clientDataJson: Buffer.from(response.clientDataJson, "base64"),
+          };
+          // The same checks the contract makes, so a bad answer is refused here and can be retried.
+          checkAssertion({ rpIdHash: req.rpIdHash!, payload: req.payload }, assertion);
+          const compact = derToCompactLowS(Buffer.from(response.signature, "base64"));
+          if (!verifyPasskeySignature(req.signerRaw, assertion, compact)) {
+            throw new Error(`That is not ${req.signerLabel}'s passkey signature`);
+          }
+          return passkeySignatureScVal({ publicKey: req.signerRaw, ...assertion, signature: compact });
+        }
+        if (isPasskey) throw new Error(`${req.signerLabel} is a passkey: it must answer with a passkey assertion`);
         const signature = signatureOf(response);
         switch (response.kind) {
           case "payload":
-            if (!key.verify(Buffer.from(req.payload), signature)) {
+            if (!key!.verify(Buffer.from(req.payload), signature)) {
               throw new Error(`That is not ${req.signerLabel}'s signature over the payload`);
             }
             return ed25519SignatureScVal(req.signerRaw, signature);
           case "message":
-            if (!key.verify(sep53Digest(message), signature)) {
+            if (!key!.verify(sep53Digest(message), signature)) {
               throw new Error(`That is not ${req.signerLabel}'s signature over the SEP-53 message`);
             }
             return messageSignatureScVal(req.signerRaw, signature);
@@ -181,8 +211,12 @@ export class SignatureBroker {
       expiresAt: new Date(now + timeoutMs).toISOString(),
       signer: {
         label: req.signerLabel,
+        kind: req.signerRaw.length === 65 ? "passkey" : "ed25519",
         id: Buffer.from(req.signerRaw).toString("hex"),
-        address: StrKey.encodeEd25519PublicKey(Buffer.from(req.signerRaw)),
+        address:
+          req.signerRaw.length === 65
+            ? `passkey ${Buffer.from(req.signerRaw).toString("hex").slice(2, 10)}…`
+            : StrKey.encodeEd25519PublicKey(Buffer.from(req.signerRaw)),
       },
       summary: req.summary,
     };
@@ -236,7 +270,7 @@ export class SignatureBroker {
 
 function signatureOf(response: SignatureResponse): Buffer {
   const raw = (response as { signature?: unknown }).signature;
-  if (response?.kind === "transaction") throw new Error('Expected a "payload" or "message" signature for this request');
+  if (response?.kind === "transaction" || response?.kind === "passkey") throw new Error('Expected a "payload" or "message" signature for this request');
   return decodeWalletSignature(String(raw ?? ""));
 }
 
@@ -263,8 +297,10 @@ export function summarizePreimage(preimageXdr: string): string[] {
 
 export interface BrokerSignerInfo {
   account: string;
-  /** Raw ed25519 key of the signer the browser must sign as. */
+  /** The key the browser must sign as: 32 bytes (ed25519) or 65 (a passkey). */
   signerRaw: Uint8Array;
+  /** For a passkey: sha256 of its relying party id. */
+  rpIdHash?: Uint8Array;
   signerLabel: string;
   timeoutMs?: number;
 }
