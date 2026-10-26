@@ -222,7 +222,7 @@ export async function invoke(ctx: ChainContext, params: InvokeParams): Promise<I
   return submitAndWait(server, prepared);
 }
 
-async function submitAndWait(server: rpc.Server, tx: Transaction): Promise<InvokeResult> {
+export async function submitAndWait(server: rpc.Server, tx: Transaction): Promise<InvokeResult> {
   const sent = await server.sendTransaction(tx);
   if (sent.status === "ERROR") {
     return { ok: false, stage: "submission", error: `sendTransaction rejected: ${sent.errorResult?.toXDR("base64") ?? "unknown"}` };

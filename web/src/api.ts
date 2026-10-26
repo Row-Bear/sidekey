@@ -66,6 +66,16 @@ export const setMasterMode = (mode: "demo" | "wallet") =>
     body: JSON.stringify({ mode }),
   });
 
+export const fetchRecordedAccounts = (address: string) =>
+  getJson<{ accounts: { index: number; smartAccountId: string }[] }>(`/api/wallet-accounts?address=${address}`);
+
+export const loadWalletAccount = (address: string, smartAccountId: string) =>
+  getJson<{ wallet: { address: string; smartAccountId: string } }>("/api/wallet-load", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ address, smartAccountId }),
+  });
+
 export const registerPasskey = (passkey: { credentialId: string; publicKeyHex: string; rpId: string }) =>
   getJson<{ delegate: string }>("/api/passkey", {
     method: "POST",

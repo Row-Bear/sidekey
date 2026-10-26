@@ -132,11 +132,27 @@ yourself, use the **Master signer** panel in the dashboard:
    secret is stored; the choice is kept in `wallet-session.json` (gitignored).
 4. **Run full demo**: every master action asks your wallet. Auth entries are signed as a SEP-53 message
    (`signMessage`, shown as `Authorize <smart account> payload <hash>`) in xBull and Freighter; step 2, the master's own XLM transfer, is a whole transaction that
-   the wallet signs and pays for. That is 5 prompts. Delegate steps still use the demo's delegate key.
+   the wallet signs and pays for. That is 5 prompts, plus one first to record the new smart account on the wallet's account (see below). Delegate steps still use the demo's delegate key.
 
 To run it again with the same wallet, send the XLM back first: in the call builder pick the master as signer
 and use the example "send 1 XLM to the master" (set the amount to 95000000000 stroops, which is 9,500 XLM).
 Switch back with **Demo keys** at any time.
+
+### Reusing a smart account
+
+**Run full demo** and **Use this wallet as master** each deploy a new smart account. To go back to an existing one,
+connect the wallet and use **Load an existing smart account of this wallet**: pick one from the list or paste a
+contract id. The dashboard reads the account's `master()` on chain and refuses it unless it is your wallet, so only
+your own accounts load. Then **Run steps 1–7 on this account** (or the per-step buttons) acts on it; step 2 needs
+9,500 XLM in the master, so return the funds first if the account still holds them.
+
+Each new wallet account is also **recorded on your wallet's own Stellar account** as a classic data entry
+(`smart_account_1`, `smart_account_2`, … with the contract id as the value). Right after the account is created the
+wallet is asked to sign one ordinary transaction for it (you can decline, and the run goes on); **Record on my
+wallet** does it later. Because the entries live on chain, the list follows the wallet to any browser or machine.
+Costs and trade-offs: each entry needs 0.5 XLM of extra reserve on the wallet's account, at most 32 can be
+recorded, and anyone can see which smart accounts a G address has recorded. The entries are only a list: loading
+always checks `master()`.
 
 The wallet shows `Authorize <smart account> payload <hash>` for auth entries, which does not say which call is
 approved; the signing dialog in the dashboard lists the exact calls first.

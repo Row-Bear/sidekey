@@ -2,10 +2,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Account, Address, Contract, Keypair, rpc, scValToNative, StrKey, TransactionBuilder } from "@stellar/stellar-sdk";
+import { type ChainContext, read } from "./chain.js";
 import { FRIENDBOT_URL, NATIVE_TOKEN_ID, NETWORK_PASSPHRASE, requireEnv } from "./config.js";
 import { deploySmartAccount } from "./deploy.js";
 import { setEnvValues } from "./envfile.js";
-import { loadSession, saveSession } from "./session.js";
+import { loadSession, rememberAccount, saveSession } from "./session.js";
 
 export const WASM_RELATIVE_PATH = "target/wasm32v1-none/release/smart_account.wasm";
 
@@ -90,7 +91,45 @@ export async function createWalletAccount({ repoRoot, sessionPath, masterAddress
   const { contractId } = deploySmartAccount({ sponsorSecret: requireEnv("SPONSOR_SECRET"), masterPublic: masterAddress, wasmPath, cwd: repoRoot });
   const wallet = { address: masterAddress, smartAccountId: contractId };
   // Keep whatever else the session holds (such as the passkey delegate).
-  saveSession(sessionPath, { ...loadSession(sessionPath), mode: "wallet", wallet });
+  const session = loadSession(sessionPath);
+  saveSession(sessionPath, { ...session, mode: "wallet", wallet, known: rememberAccount(session.known, wallet) });
   log(`Smart account ${contractId} deployed`);
+  return wallet;
+}
+
+export interface LoadWalletAccountOptions {
+  ctx: ChainContext;
+  sessionPath: string;
+  /** The connected wallet's G address. */
+  masterAddress: string;
+  /** An existing smart account to switch to. */
+  smartAccountId: string;
+}
+
+/**
+ * Switches the session to wallet mode on an existing smart account, after checking on chain that the
+ * account's master is the wallet. Anything else (another owner, or not a smart account) is refused.
+ */
+export async function loadWalletAccount({ ctx, sessionPath, masterAddress, smartAccountId }: LoadWalletAccountOptions) {
+  if (!StrKey.isValidEd25519PublicKey(masterAddress)) throw new Error(`"${masterAddress}" is not a Stellar G address`);
+  if (!StrKey.isValidContract(smartAccountId)) throw new Error(`"${smartAccountId}" is not a contract id (C…)`);
+
+  let onChainMaster: unknown;
+  try {
+    onChainMaster = await read(ctx, smartAccountId, "master");
+  } catch {
+    throw new Error(`${smartAccountId} is not a smart account from this project (its master() could not be read)`);
+  }
+  // The contract returns its master as the raw 32-byte ed25519 key.
+  if (!(onChainMaster instanceof Uint8Array) || onChainMaster.length !== 32) {
+    throw new Error(`${smartAccountId} is not a smart account from this project (master() did not return a key)`);
+  }
+  if (!Buffer.from(onChainMaster).equals(StrKey.decodeEd25519PublicKey(masterAddress))) {
+    throw new Error(`That smart account belongs to ${StrKey.encodeEd25519PublicKey(Buffer.from(onChainMaster))}, not to your wallet ${masterAddress}`);
+  }
+
+  const wallet = { address: masterAddress, smartAccountId };
+  const session = loadSession(sessionPath);
+  saveSession(sessionPath, { ...session, mode: "wallet", wallet, known: rememberAccount(session.known, wallet) });
   return wallet;
 }

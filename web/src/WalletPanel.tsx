@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { DemoState, RunRequest } from "./api-types";
-import { accountUrl, fetchWalletStatus, formatXlm, setMasterMode, shortAddress, type WalletStatus } from "./api";
+import { accountUrl, fetchRecordedAccounts, fetchWalletStatus, formatXlm, loadWalletAccount, setMasterMode, shortAddress, type WalletStatus } from "./api";
 import type { useWallet } from "./wallet";
 
 type Wallet = ReturnType<typeof useWallet>;
@@ -24,6 +24,9 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
   const { connection } = wallet;
   const [status, setStatus] = useState<WalletStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recorded, setRecorded] = useState<string[]>([]);
+  const [accountId, setAccountId] = useState("");
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!connection) return setStatus(null);
@@ -31,6 +34,21 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
     fetchWalletStatus(connection.address)
       .then((s) => !cancelled && setStatus(s))
       .catch(() => !cancelled && setStatus(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [connection?.address, version]);
+
+  // A message about one wallet does not belong to the next.
+  useEffect(() => setError(null), [connection?.address]);
+
+  // Accounts the wallet's own account records on chain; they follow the wallet to any browser.
+  useEffect(() => {
+    if (!connection) return setRecorded([]);
+    let cancelled = false;
+    fetchRecordedAccounts(connection.address)
+      .then((r) => !cancelled && setRecorded(r.accounts.map((a) => a.smartAccountId)))
+      .catch(() => !cancelled && setRecorded([]));
     return () => {
       cancelled = true;
     };
@@ -46,7 +64,29 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
     }
   };
 
+  const loadAccount = async (address: string) => {
+    setError(null);
+    setLoading(true);
+    try {
+      await loadWalletAccount(address, accountId.trim());
+      setAccountId("");
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const owned = connection !== null && state.wallet?.address === connection.address;
+  const currentRecorded = state.wallet !== null && recorded.includes(state.wallet.smartAccountId);
+  // On-chain entries first, then the ones only this dashboard remembers.
+  const choices = connection
+    ? [
+        ...recorded.map((id) => ({ id, onChain: true })),
+        ...state.knownAccounts.filter((a) => a.address === connection.address && !recorded.includes(a.smartAccountId)).map((a) => ({ id: a.smartAccountId, onChain: false })),
+      ]
+    : [];
   const wrongWallet = state.mode === "wallet" && state.wallet !== null && connection !== null && state.wallet.address !== connection.address;
   const offTestnet = connection?.network.kind === "other";
 
@@ -102,9 +142,38 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
           )}
           {owned && state.wallet && (
             <p className="muted small">
-              Smart account <a href={accountUrl(state.wallet.smartAccountId)} target="_blank" rel="noreferrer">{shortAddress(state.wallet.smartAccountId)}</a> is owned by this wallet.
+              Smart account <a href={accountUrl(state.wallet.smartAccountId)} target="_blank" rel="noreferrer">{shortAddress(state.wallet.smartAccountId)}</a> is owned by this wallet
+              {currentRecorded ? " and recorded on its account." : "; it is not recorded on the wallet's account yet."}
             </p>
           )}
+
+          <div className="field">
+            <span className="field-label">Load an existing smart account of this wallet</span>
+            <div className="actions">
+              <input
+                list="known-accounts"
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                placeholder="Pick one you used before, or paste a contract id (C…)"
+                spellCheck={false}
+                aria-label="Smart account contract id"
+              />
+              <datalist id="known-accounts">
+                {choices.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {[c.id === state.wallet?.smartAccountId ? "current" : shortAddress(c.id), c.onChain ? "on your account" : "this dashboard"].join(" · ")}
+                  </option>
+                ))}
+              </datalist>
+              <button className="ghost" disabled={busy || loading || offTestnet || accountId.trim() === ""} onClick={() => void loadAccount(connection.address)}>
+                {loading ? "Checking…" : "Load account"}
+              </button>
+            </div>
+            <span className="muted small">
+              The account's master on chain must be this wallet; anything else is refused.{" "}
+              {recorded.length > 0 && `${recorded.length} recorded on your account.`}
+            </span>
+          </div>
 
           <div className="actions">
             {status?.exists === false && (
@@ -115,6 +184,16 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
             <button className={owned ? "ghost" : undefined} disabled={busy || offTestnet} onClick={() => onStart({ action: "wallet-account", address: connection.address })}>
               {owned ? "New smart account for this wallet" : "Use this wallet as master"}
             </button>
+            {owned && !currentRecorded && (
+              <button
+                className="ghost"
+                disabled={busy || offTestnet}
+                title="One wallet-signed transaction; adds a data entry smart_account_N to your account (0.5 XLM reserve)"
+                onClick={() => onStart({ action: "record-account", address: connection.address })}
+              >
+                Record on my wallet
+              </button>
+            )}
             <button className="ghost" disabled={busy} onClick={() => void wallet.disconnect()}>
               Disconnect
             </button>

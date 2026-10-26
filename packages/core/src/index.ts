@@ -13,3 +13,4 @@ export * from "./history.js";
 export * from "./calls.js";
 export * from "./session.js";
 export * from "./fresh.js";
+export * from "./registry.js";

@@ -23,11 +23,22 @@ export interface Session {
   mode: "demo" | "wallet";
   /** The most recent wallet account, kept when switching back to demo mode. */
   wallet?: WalletAccount;
+  /** Smart accounts this dashboard created or loaded for wallets, newest first, so they can be loaded again. */
+  known?: WalletAccount[];
   /** Who plays the delegate: the demo's own key, or a passkey. */
   delegate: "key" | "passkey";
   /** The passkey, kept when switching the delegate back to the key. */
   passkey?: PasskeyDelegate;
 }
+
+const MAX_KNOWN_ACCOUNTS = 30;
+
+const isWalletAccount = (a: Partial<WalletAccount> | undefined): a is WalletAccount =>
+  !!a && StrKey.isValidEd25519PublicKey(a.address ?? "") && StrKey.isValidContract(a.smartAccountId ?? "");
+
+/** Puts an account first in the known list, once. */
+export const rememberAccount = (known: WalletAccount[] | undefined, account: WalletAccount): WalletAccount[] =>
+  [account, ...(known ?? []).filter((a) => a.smartAccountId !== account.smartAccountId)].slice(0, MAX_KNOWN_ACCOUNTS);
 
 const DEFAULT: Session = { mode: "demo", delegate: "key" };
 
@@ -38,11 +49,13 @@ export function loadSession(path: string | URL): Session {
   if (!existsSync(path)) return { ...DEFAULT };
   const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<Session>;
   const wallet = parsed.wallet;
-  const valid = wallet && StrKey.isValidEd25519PublicKey(wallet.address) && StrKey.isValidContract(wallet.smartAccountId);
+  const valid = isWalletAccount(wallet);
+  const known = Array.isArray(parsed.known) ? parsed.known.filter(isWalletAccount).slice(0, MAX_KNOWN_ACCOUNTS) : [];
   const passkey = isPasskey(parsed.passkey) ? parsed.passkey : undefined;
   return {
     mode: parsed.mode === "wallet" && valid ? "wallet" : "demo",
     ...(valid ? { wallet } : {}),
+    ...(known.length > 0 ? { known } : {}),
     delegate: parsed.delegate === "passkey" && passkey ? "passkey" : "key",
     ...(passkey ? { passkey } : {}),
   };

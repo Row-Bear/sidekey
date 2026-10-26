@@ -18,6 +18,9 @@ import {
   CORE_STEP_COUNT,
   createFreshDemoAccount,
   createWalletAccount,
+  loadWalletAccount,
+  readRecordedAccounts,
+  recordAccount,
   createScenarioContext,
   type ExpiryInput,
   fundWithFriendbot,
@@ -155,6 +158,7 @@ function parseRunRequest(body: unknown): RunRequest {
   if (b.action === "full" || b.action === "fresh") return { action: b.action };
   if (b.action === "wallet-account") return { action: "wallet-account", address: parseAddress((b as { address?: unknown }).address) };
   if (b.action === "wallet-fund") return { action: "wallet-fund", address: parseAddress((b as { address?: unknown }).address) };
+  if (b.action === "record-account") return { action: "record-account", address: parseAddress((b as { address?: unknown }).address) };
   if (b.action === "call") return { action: "call", call: parseCallRequest(b.call), ...parseVia(b.via) };
   if (b.action === "policy") return { action: "policy", policy: parsePolicyOp(b.policy), ...parseVia(b.via) };
   if (b.action === "steps") {
@@ -163,7 +167,7 @@ function parseRunRequest(body: unknown): RunRequest {
     const valid = (n: number) => Number.isInteger(n) && n >= 1 && n <= STEPS.length;
     if (valid(from) && valid(to) && from <= to) return { action: "steps", from, to, ...parseVia(b.via) };
   }
-  throw new Error(`Invalid run request; expected action "full", "fresh", "steps" (from/to in 1-${STEPS.length}), "call", "policy", "wallet-account" or "wallet-fund"`);
+  throw new Error(`Invalid run request; expected action "full", "fresh", "steps" (from/to in 1-${STEPS.length}), "call", "policy", "wallet-account", "wallet-fund" or "record-account"`);
 }
 
 export function demoApi(repoRoot: string): Plugin {
@@ -191,11 +195,36 @@ export function demoApi(repoRoot: string): Plugin {
     return (signer) => (signer.raw.length === 65 || (ctx.walletMaster && signer.id === "master") ? browser(signer) : null);
   };
 
+  /** Asks the wallet to sign a transaction of its own account. */
+  const walletTransactionSigner = (ctx: ReturnType<typeof currentContext>) => (transactionXdr: string, summary: string[]) =>
+    broker.requestTransaction({
+      signerRaw: ctx.master.rawPublicKey(),
+      signerLabel: "master",
+      transactionXdr,
+      networkPassphrase: NETWORK_PASSPHRASE,
+      summary,
+    });
+
   const run: DemoState["run"] = { busy: false, currentStep: null, label: null, log: [], lastError: null };
   const log = (message: string) => {
     run.log.push(`${new Date().toLocaleTimeString("en-GB")}  ${message}`);
     if (run.log.length > MAX_LOG_LINES) run.log.splice(0, run.log.length - MAX_LOG_LINES);
   };
+
+  /** Writes the smart account into the wallet's account data. After creating an account a refusal only logs, so the run goes on. */
+  async function recordOnChain(address: string, smartAccountId: string, required: boolean) {
+    run.label = "Recording the smart account on your wallet's account";
+    try {
+      const ctx = currentContext();
+      if (!ctx.walletMaster) throw new Error("Only a wallet master can record accounts");
+      const result = await recordAccount({ ctx, masterAddress: address, smartAccountId, signTransaction: walletTransactionSigner(ctx) });
+      log(result.status === "already" ? `Already recorded as smart_account_${result.index}` : `Recorded as smart_account_${result.index} (${result.hash.slice(0, 10)}…)`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (required) throw err;
+      log(`Not recorded on your wallet's account (use "Record on my wallet" later): ${message}`);
+    }
+  }
 
   async function buildState(): Promise<DemoState> {
     const ctx = currentContext();
@@ -210,6 +239,7 @@ export function demoApi(repoRoot: string): Plugin {
       },
       mode: ctx.walletMaster ? "wallet" : "demo",
       wallet: loadSession(sessionPath).wallet ?? null,
+      knownAccounts: loadSession(sessionPath).known ?? [],
       delegate: ctx.delegatePasskey ? "passkey" : "key",
       passkey: loadSession(sessionPath).passkey ?? null,
       snapshot: null,
@@ -264,7 +294,14 @@ export function demoApi(repoRoot: string): Plugin {
         run.label = "Deploying a smart account for the wallet";
         clearResults(resultsPath);
         clearCallHistory(historyPath);
-        await createWalletAccount({ repoRoot, sessionPath, masterAddress: request.address, log });
+        const created = await createWalletAccount({ repoRoot, sessionPath, masterAddress: request.address, log });
+        await recordOnChain(created.address, created.smartAccountId, false);
+        return;
+      }
+      if (request.action === "record-account") {
+        const { mode, wallet } = loadSession(sessionPath);
+        if (mode !== "wallet" || wallet?.address !== request.address) throw new Error("Switch to your wallet's smart account first");
+        await recordOnChain(wallet.address, wallet.smartAccountId, true);
         return;
       }
       if (request.action === "fresh" || request.action === "full") {
@@ -274,7 +311,8 @@ export function demoApi(repoRoot: string): Plugin {
         if (session.mode === "wallet" && session.wallet) {
           // The wallet stays the master; only the smart account is new.
           run.label = "Deploying a fresh smart account for the wallet";
-          await createWalletAccount({ repoRoot, sessionPath, masterAddress: session.wallet.address, log });
+          const created = await createWalletAccount({ repoRoot, sessionPath, masterAddress: session.wallet.address, log });
+          await recordOnChain(created.address, created.smartAccountId, false);
         } else {
           run.label = "Creating a fresh master account and smart account";
           await createFreshDemoAccount({ repoRoot, envPath, log });
@@ -306,16 +344,7 @@ export function demoApi(repoRoot: string): Plugin {
           }),
         };
       }
-      if (ctx.walletMaster) {
-        ctx.remoteTransactionSigner = (transactionXdr, summary) =>
-          broker.requestTransaction({
-            signerRaw: ctx.master.rawPublicKey(),
-            signerLabel: "master",
-            transactionXdr,
-            networkPassphrase: NETWORK_PASSPHRASE,
-            summary,
-          });
-      }
+      if (ctx.walletMaster) ctx.remoteTransactionSigner = walletTransactionSigner(ctx);
       for (let step = from; step <= to; step++) {
         run.currentStep = step;
         run.label = `Step ${step}/${STEPS.length}: ${STEPS[step - 1].name}`;
@@ -369,6 +398,27 @@ export function demoApi(repoRoot: string): Plugin {
             const address = parseAddress(new URL(req.url ?? "", "http://localhost").searchParams.get("address"));
             const status = await accountStatus(currentContext().rpcUrl, address);
             return json(res, 200, status.exists ? { exists: true, stroops: status.stroops.toString() } : { exists: false });
+          }
+
+          if (req.method === "GET" && path === "/wallet-accounts") {
+            const address = parseAddress(new URL(req.url ?? "", "http://localhost").searchParams.get("address"));
+            return json(res, 200, { accounts: await readRecordedAccounts(currentContext(), address) });
+          }
+
+          if (req.method === "POST" && path === "/wallet-load") {
+            if (run.busy) return json(res, 409, { error: "A run is in progress" });
+            const body = (await readBody(req)) as Record<string, unknown>;
+            if (!isText(body.smartAccountId)) throw new Error("smartAccountId is required");
+            const wallet = await loadWalletAccount({
+              ctx: currentContext(),
+              sessionPath,
+              masterAddress: parseAddress(body.address),
+              smartAccountId: body.smartAccountId.trim(),
+            });
+            // Results and calls belong to the account they ran on.
+            clearResults(resultsPath);
+            clearCallHistory(historyPath);
+            return json(res, 200, { wallet });
           }
 
           if (req.method === "POST" && path === "/passkey") {

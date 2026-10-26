@@ -318,10 +318,17 @@ export default function App() {
           </div>
 
           <section className="card">
-            <h2>Demo steps</h2>
+            <div className="section-head">
+              <h2>Demo steps</h2>
+              <button className="ghost" disabled={busy} onClick={() => void start({ action: "steps", from: 1, to: 7 })}>
+                Run steps 1–7 on this account
+              </button>
+            </div>
             <p className="muted small">
               "Run full demo" creates a fresh master account and smart account first (about a minute), then runs all
-              seven steps. Per-step Run buttons act on the current smart account.
+              seven steps. To reuse the current smart account (for example one you loaded), run the steps on it; step 2
+              needs 9,500 XLM in the master, so return the funds first if the account still holds them. Per-step Run
+              buttons also act on the current smart account.
             </p>
             <ol className="steps">
               {state.steps

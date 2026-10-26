@@ -309,6 +309,27 @@ locally before sending, accepts base64 or hex, and catches the base64 trap with 
     fails, note which authenticator; it must support ES256 (P-256).
   - Both together: a wallet master and a passkey delegate in one run.
 
+### Addendum: reusing wallet smart accounts (after WP6)
+
+- [x] **Load an existing smart account** for the connected wallet (`POST /api/wallet-load`): the picker lists
+      accounts recorded on chain plus ones this dashboard remembers (`known` in `wallet-session.json`,
+      gitignored), or takes a pasted contract id. `loadWalletAccount` reads `master()` (a raw 32-byte key, not an
+      address, which the first version got wrong and the e2e caught) and refuses another owner, a contract that is
+      not a smart account, and anything that is not a contract id. Loading clears the previous account's results.
+      A **Run steps 1–7 on this account** button reuses it.
+- [x] **Record accounts on the wallet's own account** as classic data entries, one per account
+      (`smart_account_1`…`smart_account_32`, value = contract id; `packages/core/src/registry.ts`). Stellar RPC
+      reads data entries by exact key, so keys are numbered and the range is read in one request. The write is a
+      `manage_data` transaction the wallet signs with `signTransaction` (the same path as step 2); it costs
+      0.5 XLM of the wallet's reserve per entry. It is asked right after an account is created (declining only
+      logs a line) and with **Record on my wallet** later; recording an account twice does nothing.
+- Verified: 81 core tests (new registry and session tests; 9 of 9 deliberate breaks caught after adding the
+  last-slot case); `npm run e2e:wallet` now also covers the record prompt, a declined record, recording later,
+  reading the entries back from chain, loading the first account again, four refused loads, and a master action
+  on the loaded account. Checked by hand in the dashboard with a test wallet (the refusal message shows).
+- Not yet tried by hand with xBull or Freighter: the `manage_data` transaction prompt, and the 0.5 XLM reserve
+  on a real wallet account.
+
 ## Suggested cut line
 
 About 12 hours in total. If time is short, the value order is:

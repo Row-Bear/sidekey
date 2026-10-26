@@ -22,6 +22,8 @@ export interface DemoState {
   mode: "demo" | "wallet";
   /** The last wallet smart account, kept when switching back to demo mode. */
   wallet: WalletAccount | null;
+  /** Smart accounts created or loaded for wallets before, newest first. */
+  knownAccounts: WalletAccount[];
   /** Who plays the delegate: the demo's own key, or a passkey created in the browser. */
   delegate: "key" | "passkey";
   /** The passkey, kept when the delegate is switched back to the key. */
@@ -54,6 +56,7 @@ export type RunRequest =
   | { action: "fresh" }
   | { action: "wallet-account"; address: string }
   | { action: "wallet-fund"; address: string }
+  | { action: "record-account"; address: string }
   | { action: "steps"; from: number; to: number; via?: SigningVia }
   | { action: "call"; call: CallRequest; via?: SigningVia }
   | { action: "policy"; policy: PolicyOp; via?: SigningVia };
