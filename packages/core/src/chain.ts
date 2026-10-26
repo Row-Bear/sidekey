@@ -31,6 +31,8 @@ export interface ChainContext {
   sponsor: Keypair;
   /** When set, calls are submitted through it instead of being signed and paid for by the sponsor. */
   relay?: Relay;
+  /** The G account whose sequence number the simulations use (any existing account); the sponsor when unset. */
+  simulationSource?: string;
 }
 
 export interface InvokeParams {
@@ -81,6 +83,29 @@ function credentialAddress(entry: xdr.SorobanAuthorizationEntry): string | null 
     default:
       return null;
   }
+}
+
+/**
+ * When the simulation source is also an authorizer, the simulator records its authorization as source-account
+ * credentials, which the transaction signature would cover. A relayer builds the transaction with its own source
+ * account, so those entries become address credentials (with a fresh nonce) that the account signs separately.
+ */
+function detachSourceCredentials(entries: xdr.SorobanAuthorizationEntry[], address: string): xdr.SorobanAuthorizationEntry[] {
+  return entries.map((entry) => {
+    if (entry.credentials.type !== "sorobanCredentialsSourceAccount") return entry;
+    const nonce = xdr.Int64.fromString(BigInt.asIntN(63, BigInt(`0x${Array.from(globalThis.crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("")}`)).toString());
+    return new xdr.SorobanAuthorizationEntry({
+      rootInvocation: entry.rootInvocation,
+      credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+        new xdr.SorobanAddressCredentials({
+          address: new Address(address).toScAddress(),
+          nonce,
+          signatureExpirationLedger: 0,
+          signature: xdr.ScVal.scvVoid(),
+        }),
+      ),
+    });
+  });
 }
 
 async function signAuthEntries(
@@ -180,7 +205,7 @@ export type RecordedAuth =
 export async function recordAuthContexts(ctx: ChainContext, params: Pick<InvokeParams, "contractId" | "method" | "args">, account: string): Promise<RecordedAuth> {
   const { server, sponsor } = ctx;
   const recording = await server.simulateTransaction(
-    buildTransaction(await server.getAccount(sponsor.publicKey()), contractCallFunction(params), []),
+    buildTransaction(await server.getAccount(ctx.simulationSource ?? ctx.sponsor.publicKey()), contractCallFunction(params), []),
   );
   if (rpc.Api.isSimulationError(recording)) {
     return { ok: false, error: errorText(recording.error), detail: recording.error };
@@ -202,16 +227,17 @@ export async function invoke(ctx: ChainContext, params: InvokeParams): Promise<I
   const hostFunction = contractCallFunction(params);
 
   const recording = await server.simulateTransaction(
-    buildTransaction(await server.getAccount(sponsor.publicKey()), hostFunction, []),
+    buildTransaction(await server.getAccount(ctx.simulationSource ?? ctx.sponsor.publicKey()), hostFunction, []),
   );
   if (rpc.Api.isSimulationError(recording)) {
     return { ok: false, stage: "simulation", error: errorText(recording.error), detail: recording.error };
   }
 
-  const unsigned = recording.result?.auth ?? [];
+  const recorded = recording.result?.auth ?? [];
+  const unsigned = ctx.relay && ctx.simulationSource ? detachSourceCredentials(recorded, ctx.simulationSource) : recorded;
   const signed = await signAuthEntries(unsigned, params.authorizers ?? [], recording.latestLedger + AUTH_VALIDITY_LEDGERS);
 
-  const withAuth = buildTransaction(await server.getAccount(sponsor.publicKey()), hostFunction, signed);
+  const withAuth = buildTransaction(await server.getAccount(ctx.simulationSource ?? ctx.sponsor.publicKey()), hostFunction, signed);
   const enforcing = await server.simulateTransaction(withAuth);
   if (rpc.Api.isSimulationError(enforcing)) {
     return {

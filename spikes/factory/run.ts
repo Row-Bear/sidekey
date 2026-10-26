@@ -37,7 +37,8 @@ const base = createScenarioContext({
   MASTER_PUBLIC: master.publicKey(),
   SMART_ACCOUNT_ID: factory, // placeholder until the account exists
 });
-const ctx = { ...base, relay };
+// The master (an account that exists anyway) is the simulation source, so no other account is involved.
+const ctx = { ...base, relay, simulationSource: master.publicKey() };
 
 const predicted = (await read(ctx, factory, "account_address", [new Address(master.publicKey()).toScVal(), nativeToScVal(0, { type: "u32" })])) as string;
 console.log("predicted account:", predicted);

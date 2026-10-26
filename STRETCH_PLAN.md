@@ -487,7 +487,9 @@ Findings:
   ("non-existing value for account"). Real wallets have funded accounts; on testnet friendbot does it.
 - The Channels testnet API key is issued on a plain GET, so a key shipped in a static page is public:
   fair-use limits (fees per key per 24 h) are the only protection. A small proxy would hide it.
-- The `invoke` pipeline still needs one existing account as the simulation source (the sponsor today);
-  a browser build would use any well-known funded account.
+- Simulations can use the master as the source (`ChainContext.simulationSource`), so no other account
+  is involved. The simulator then records the master's authorization as source-account credentials,
+  which Channels rejects ("Detached address credentials required"); core converts those entries to
+  address credentials with a fresh nonce before signing (`detachSourceCredentials`).
 - Next: move the Node-only parts of `packages/core` (crypto, files) to browser equivalents, then a
   static plain page; the demo page stays dev-only.
