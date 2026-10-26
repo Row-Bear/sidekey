@@ -18,7 +18,7 @@ const MAX_ARGS: u32 = 16;
 
 /// What this contract supports, so a client can tell an older account from this one (older ones have no
 /// `version` function at all). 3 adds the `LessThan` argument constraint.
-const CONTRACT_VERSION: u32 = 3;
+const CONTRACT_VERSION: u32 = 4;
 
 #[contracttype]
 enum DataKey {
@@ -449,6 +449,9 @@ impl CustomAccountInterface for SmartAccount {
         signature: AccSignature,
         auth_contexts: Vec<Context>,
     ) -> Result<(), AccError> {
+        // Every use extends the account's lifetime (a no-op while plenty is left), so an account that is in use
+        // never lets its master and policy expire. A failed check rolls this back with the rest of the call.
+        Self::bump(&env);
         // Authenticate first; each arm yields who signed. Invalid signatures trap.
         let signer = match signature {
             AccSignature::Ed25519(signature) => {

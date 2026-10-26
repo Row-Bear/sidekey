@@ -519,3 +519,11 @@ real wallets (Freighter/xBull) on this path, real passkey hardware, a phone.
 
 Known limits: the wallet has 55 s to sign the `create` transaction; the master wallet must already
 exist on chain (friendbot button on testnet); Channels' fair-use fee limit applies per browser.
+
+## Account version 4: lifetime extended on use
+
+`__check_auth` now extends the instance lifetime on every call (no cost while plenty is left; a failed check
+rolls it back), after the security review noted that OpenZeppelin extends on every read. `version()` is 4.
+Three tests (master, delegate, rejected call); removing the extension fails the first two. The factory was
+pointed at the new WASM (`set_wasm_hash`, hash `acdd92ff…49ee`), so new accounts are version 4; existing
+accounts keep their version. `npm run e2e:factory` shows version 4 on a new account.

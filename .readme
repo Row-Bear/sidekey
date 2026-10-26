@@ -122,8 +122,8 @@ A rule allows one function on one contract, with a constraint for each argument:
 (for addresses), **exactly…** a value, or **less than…** a limit (for integers, strictly below it, with no lower
 bound; XLM amounts are in stroops). Rules for the same function are alternatives, so a call is allowed if any one
 matches; remove the old rule to replace it (the editor warns when one exists). The expiry can be in minutes, hours
-or days, or at a ledger. A signer whose expiry is more than about 30 days away may stop working earlier, because
-the account's stored policy lives about 30 days after the last policy change.
+or days, or at a ledger. Every authorized call extends the account's stored policy to about 30 days ahead (version 4
+and later; older accounts only extend it when the policy changes), so an account in use keeps its policy.
 
 "Less than" needs a smart account created with this version of the contract (it reports `version()` 3). Older
 accounts cannot enforce it, so the editor greys the option out for them and refuses the rule.
@@ -246,8 +246,9 @@ This is a hackathon PoC, not audited, and testnet only.
 - Policy is an allowlist with per-signer expiry and per-argument constraints (any value, this account, exactly a
   value, or an integer below a limit); there are no cumulative spend limits or rate limits. A "less than" limit
   applies to each call on its own, so it does not stop many small calls from adding up.
-- The contract extends its own storage lifetime to about 30 days on deploy and on
-  policy changes only; a long-idle account would need its TTL extended.
+- The contract extends its own storage lifetime to about 30 days on deploy, on policy changes and on every
+  authorized call (version 4; earlier versions did it on policy changes only). An account idle for more than
+  about 30 days has its policy archived and needs a restore before it works again.
 - The dashboard's run endpoint is a dev-server feature that holds testnet secrets server
   side. It binds to localhost and refuses cross-origin and non-JSON requests, but do not
   expose it publicly.

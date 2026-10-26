@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use soroban_sdk::{
     auth::{Context, ContractContext, ContractExecutable, CreateContractHostFnContext},
     symbol_short,
-    testutils::{Address as _, Ledger as _},
+    testutils::{Address as _, storage::Instance as _, Ledger as _},
     vec,
     xdr::ToXdr,
     Address, BytesN, Env, IntoVal, InvokeError, Symbol, Val, Vec,
@@ -15,7 +15,7 @@ use soroban_sdk::{
 
 use crate::{
     AccError, AccSignature, ArgConstraint, Ed25519Signature, PasskeySignature, Rule, SignerId, SignerPolicy,
-    SmartAccount, SmartAccountClient,
+    SmartAccount, SmartAccountClient, TTL_EXTEND_TO,
 };
 
 type CheckResult = Result<(), Result<AccError, InvokeError>>;
@@ -290,7 +290,47 @@ fn zero_argument_functions_can_be_allowed() {
 #[test]
 fn version_tells_clients_that_less_than_is_supported() {
     let f = setup();
-    assert_eq!(f.client.version(), 3);
+    assert_eq!(f.client.version(), 4);
+}
+
+// ---- Lifetime ----
+
+fn instance_ttl(f: &Fixture) -> u32 {
+    f.env.as_contract(&f.client.address, || f.env.storage().instance().get_ttl())
+}
+
+fn advance_until_ttl_is(f: &Fixture, remaining: u32) {
+    let sequence = f.env.ledger().sequence();
+    f.env.ledger().set_sequence_number(sequence + instance_ttl(f) - remaining);
+    assert_eq!(instance_ttl(f), remaining);
+}
+
+#[test]
+fn a_master_call_extends_the_accounts_lifetime() {
+    let f = setup();
+    advance_until_ttl_is(&f, 1_000);
+    let other = Address::generate(&f.env);
+    let ctx = vec![&f.env, call(&f.env, &other, symbol_short!("withdraw"), &other)];
+    assert_eq!(check(&f, &f.master, ctx), Ok(()));
+    assert_eq!(instance_ttl(&f), TTL_EXTEND_TO);
+}
+
+#[test]
+fn a_delegate_call_extends_the_accounts_lifetime() {
+    let f = setup();
+    allow_delegate_claim(&f);
+    advance_until_ttl_is(&f, 1_000);
+    assert_eq!(delegate_claims(&f), Ok(()));
+    assert_eq!(instance_ttl(&f), TTL_EXTEND_TO);
+}
+
+#[test]
+fn a_rejected_call_does_not_extend_the_lifetime() {
+    let f = setup();
+    advance_until_ttl_is(&f, 1_000);
+    // The delegate has no policy, so the check fails and its effects (including the extension) are dropped.
+    assert!(delegate_claims(&f).is_err());
+    assert_eq!(instance_ttl(&f), 1_000);
 }
 
 /// `poke(value)` on the simulator, allowed only for integers below `limit`.
