@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { STATIC } from "./build";
 import type { CallRecord, RuleView, StepResult } from "@poc/core";
 import type { DemoState, StepMeta } from "./api-types";
 import {
@@ -403,9 +404,11 @@ export default function App({ variant }: { variant: Variant }) {
               </button>
             </>
           )}
-          <a className="nav-link" href={demo ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}demo`}>
-            {demo ? "← Policy tester" : "Guided demo →"}
-          </a>
+          {!STATIC && (
+            <a className="nav-link" href={demo ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}demo`}>
+              {demo ? "← Policy tester" : "Guided demo →"}
+            </a>
+          )}
           {!demo && state && (
             <WalletChip wallet={wallet} state={state} busy={busy} version={signersVersion} onStart={(request) => void start(request)} />
           )}

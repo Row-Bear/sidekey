@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit && tsc -p web --noEmit",
     "web": "vite web",
     "web:build": "vite build web",
+    "web:build:static": "VITE_STATIC=1 vite build web",
     "setup:accounts": "tsx scripts/01-setup-accounts.ts",
     "build:contract": "stellar contract build",
     "test:contract": "cargo test -p smart-account",

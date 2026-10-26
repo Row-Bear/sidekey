@@ -1,11 +1,16 @@
 import type { CallRequest, FunctionInfo, PreviewResult, RuleView, SignatureResponse, SignerView, StepResult } from "@poc/core";
 import type { DemoState, RunRequest } from "./api-types";
+import { STATIC } from "./build";
 
 // Where the API lives: the same origin by default, or another server when the page is hosted statically.
 const API_BASE = ((import.meta.env?.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 
+/** The static build has no server: its requests are answered in the browser (see `local/backend.ts`). */
+const apiFetch = (url: string, init?: RequestInit): Promise<Response> =>
+  STATIC ? import("./local/localFetch.ts").then((m) => m.localFetch(url, init)) : fetch(`${API_BASE}${url}`, init);
+
 export async function fetchState(): Promise<DemoState> {
-  const res = await fetch(`${API_BASE}/api/state`);
+  const res = await apiFetch("/api/state");
   if (!res.ok) throw new Error(`State request failed (${res.status})`);
   return (await res.json()) as DemoState;
 }
@@ -24,7 +29,7 @@ export interface SignersResponse {
 }
 
 async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${url}`, init);
+  const res = await apiFetch(url, init);
   const body = (await res.json()) as T & { error?: string };
   if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
   return body;
@@ -99,7 +104,7 @@ export const selectDelegate = (delegate: "key" | "passkey") =>
 export const looksLikeContractId = (text: string) => /^C[A-Z2-7]{55}$/.test(text.trim());
 
 export async function startRun(request: RunRequest): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/run`, {
+  const res = await apiFetch("/api/run", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(request),

@@ -493,3 +493,29 @@ Findings:
   address credentials with a fresh nonce before signing (`detachSourceCredentials`).
 - Next: move the Node-only parts of `packages/core` (crypto, files) to browser equivalents, then a
   static plain page; the demo page stays dev-only.
+
+## Static build (no server)
+
+`npm run web:build:static` (`VITE_STATIC=1`) builds the plain page without the dev server API. The
+page answers its own `/api/*` requests in the browser (`web/src/local/`, using
+`packages/core/src/browser.ts`):
+
+- Accounts are made by the factory: the wallet signs one `create` transaction (source = the wallet,
+  inclusion fee 0, valid 55 s) and OpenZeppelin Channels wraps it in a fee bump. Existing accounts
+  are found from the wallet address alone (`findFactoryAccounts`), plus any recorded the old way.
+- Policy edits and delegate calls go through Channels as function + signed auth entries
+  (`ChainContext.relay`); the master is the simulation source (`detachSourceCredentials`).
+- Each browser gets its own Channels API key from the public key endpoint (stored in localStorage).
+- The session and history are in localStorage; the demo page and its steps are not part of this build.
+- Core was split into browser-safe modules (`browser.ts`) and Node-only ones (`*-file.ts`, `deploy`,
+  `envfile`, `fresh`, `results`); hashing uses the SDK and `@noble/curves`, and a Buffer shim covers
+  the rest (its lack of the `base64url` encoding was found by the browser test, now avoided).
+- `.github/workflows/pages.yml` builds and publishes it to GitHub Pages (`VITE_BASE=/<repo>/`).
+
+Checked in a browser against testnet with no server: wallet funded, account created through the
+factory, a master policy edit, and a passkey delegate's call (virtual authenticator), all paid by
+Channels; also a production build under `/sidekey/` (service worker, 404 fallback). Not checked:
+real wallets (Freighter/xBull) on this path, real passkey hardware, a phone.
+
+Known limits: the wallet has 55 s to sign the `create` transaction; the master wallet must already
+exist on chain (friendbot button on testnet); Channels' fair-use fee limit applies per browser.

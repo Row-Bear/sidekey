@@ -19,7 +19,8 @@ const spaFallback = (): Plugin => ({
 export default defineConfig({
   // Set VITE_BASE=/repo-name/ when hosting under a sub-path.
   base: process.env.VITE_BASE ?? "/",
-  plugins: [react(), demoApi(repoRoot), spaFallback()],
+  // The static build (VITE_STATIC=1) has no dev server API: the page answers its own requests.
+  plugins: [react(), ...(process.env.VITE_STATIC === "1" ? [] : [demoApi(repoRoot)]), spaFallback()],
   // The demo API can spend testnet funds and rewrite .env, so it is never exposed on the network.
   server: { host: "localhost", port: 5173 },
 });

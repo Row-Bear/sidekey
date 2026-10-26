@@ -228,6 +228,14 @@ docs/recorded-run.md       recorded testnet run
 PLAN.md                    development plan and status
 ```
 
+## Static version (no server)
+
+`npm run web:build:static` builds the plain page for static hosting such as GitHub Pages
+(`.github/workflows/pages.yml`; set `VITE_BASE=/<repo>/` for a sub-path). It needs no server: the wallet
+signs one transaction to create the account through the on-chain factory (`contracts/factory`), and
+OpenZeppelin's Channels service pays every fee. Policy edits and delegate calls work the same way. The
+guided demo (`/demo`) still needs the dev server. Details and findings: `STRETCH_PLAN.md`.
+
 ## Limitations and security notes
 
 This is a hackathon PoC, not audited, and testnet only.

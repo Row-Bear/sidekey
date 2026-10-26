@@ -144,3 +144,11 @@ describe("ScVal encoders", () => {
     assert.equal(parseSignerPolicy({ rules: [] }).rpIdHashHex, null);
   });
 });
+
+describe("base64url", () => {
+  it("matches Node's encoding: URL-safe characters and no padding", () => {
+    for (const bytes of [new Uint8Array([251, 255, 254]), new Uint8Array([0]), new Uint8Array(32).fill(250), new Uint8Array([])]) {
+      assert.equal(base64url(bytes), Buffer.from(bytes).toString("base64url"));
+    }
+  });
+});

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { STATIC } from "./build";
 import type { DemoState, RunRequest } from "./api-types";
 import { accountUrl, loadWalletAccount, registerPasskey, shortAddress } from "./api";
 import { CopyButton } from "./CopyButton";
@@ -81,7 +82,7 @@ export function AccountPanel({ wallet, state, busy, version, onStart, onChanged 
           Smart account{" "}
           <Info text="Holds the funds and checks every signature itself. Your wallet is its master and can do anything; a delegate can only do what its rules allow." />
         </h2>
-        {currentId && (
+        {currentId && !STATIC && (
           <span className={currentRecorded ? "tag ok" : "tag"} title="Recorded as a data entry on your wallet's own Stellar account, so any browser can find it">
             {currentRecorded ? "recorded on your wallet" : "not recorded on your wallet"}
           </span>
@@ -163,7 +164,7 @@ export function AccountPanel({ wallet, state, busy, version, onStart, onChanged 
             >
               {creating ? <Spinner label="Creating smart account…" /> : owned ? "New smart account" : "Create smart account"}
             </button>
-            {owned && !currentRecorded && (
+            {owned && !currentRecorded && !STATIC && (
               <button
                 className="ghost"
                 disabled={busy || offTestnet}

@@ -21,7 +21,9 @@ const P256_SPKI_PREFIX = Buffer.from("3059301306072a8648ce3d020106082a8648ce3d03
 export const rpIdHash = (rpId: string): Buffer => Buffer.from(hash(Buffer.from(rpId, "utf8")));
 
 /** base64url without padding, the form WebAuthn puts the challenge in. */
-export const base64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
+// Spelled out because the Buffer shim a browser uses does not know the "base64url" encoding.
+export const base64url = (bytes: Uint8Array): string =>
+  Buffer.from(bytes).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
 /** The 65-byte uncompressed point from the SPKI that `getPublicKey()` returns. */
 export function publicKeyFromSpki(spki: Uint8Array): Buffer {

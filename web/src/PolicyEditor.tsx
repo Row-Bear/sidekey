@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { STATIC } from "./build";
 import type { ConstraintInput, FunctionInfo, PolicyOp, RuleView } from "@poc/core";
 import { describeRule, expiryText, shortAddress, type SignersResponse } from "./api";
 import { ArgInput } from "./ArgInput";
@@ -251,7 +252,7 @@ export function PolicyEditor({ demo = true, compact = false, data, busy, contrac
           </>
         )}
       </div>
-      <span className="muted small">Policy edits are signed by the master and paid for by the fee sponsor.</span>
+      <span className="muted small">{STATIC ? "Policy edits are signed by the master; a relayer pays the fee." : "Policy edits are signed by the master and paid for by the fee sponsor."}</span>
     </section>
   );
 }
