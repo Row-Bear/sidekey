@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Keypair, StrKey } from "@stellar/stellar-sdk";
-import { loadSession, rememberAccount, saveSession, type WalletAccount } from "../src/session.ts";
+import { rememberAccount, type WalletAccount } from "../src/session.ts";
+import { loadSession, saveSession } from "../src/session-file.ts";
 
 const account = (address = Keypair.random().publicKey()): WalletAccount => ({
   address,

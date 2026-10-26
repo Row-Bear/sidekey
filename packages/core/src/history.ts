@@ -1,5 +1,5 @@
-// Node-only: persists the history of custom calls and policy edits for the dashboard.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+// The history of custom calls and policy edits shown in the dashboard. Where it is kept is up to the caller:
+// see `history-file.ts`.
 
 export interface CallRecord {
   id: string;
@@ -22,15 +22,5 @@ export interface CallRecord {
 
 const MAX_RECORDS = 30;
 
-export function loadCallHistory(path: string | URL): CallRecord[] {
-  return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as CallRecord[]) : [];
-}
-
 /** Newest first, capped. */
-export function saveCallRecord(path: string | URL, record: CallRecord): void {
-  writeFileSync(path, JSON.stringify([record, ...loadCallHistory(path)].slice(0, MAX_RECORDS), null, 2) + "\n");
-}
-
-export function clearCallHistory(path: string | URL): void {
-  writeFileSync(path, "[]\n");
-}
+export const addCallRecord = (history: readonly CallRecord[], record: CallRecord): CallRecord[] => [record, ...history].slice(0, MAX_RECORDS);

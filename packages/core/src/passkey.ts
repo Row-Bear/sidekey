@@ -1,4 +1,5 @@
-import { createHash, createPublicKey, verify } from "node:crypto";
+import { p256 } from "@noble/curves/p256";
+import { hash } from "@stellar/stellar-sdk";
 
 // WebAuthn (passkey) assertions as the smart account verifies them. `checkAssertion` applies the same
 // checks as the contract, so the server can refuse a bad answer early (and let the person retry)
@@ -17,7 +18,7 @@ const CLIENT_DATA_HEAD = '{"type":"webauthn.get","challenge":"';
 /** SPKI header for a P-256 public key; the 65-byte uncompressed point follows it. */
 const P256_SPKI_PREFIX = Buffer.from("3059301306072a8648ce3d020106082a8648ce3d030107034200", "hex");
 
-export const rpIdHash = (rpId: string): Buffer => createHash("sha256").update(rpId, "utf8").digest();
+export const rpIdHash = (rpId: string): Buffer => Buffer.from(hash(Buffer.from(rpId, "utf8")));
 
 /** base64url without padding, the form WebAuthn puts the challenge in. */
 export const base64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
@@ -89,10 +90,9 @@ export function checkAssertion(expected: { rpIdHash: Uint8Array; payload: Uint8A
 /** Verifies a compact low-S ES256 signature over `authenticatorData || sha256(clientDataJSON)`. */
 export function verifyPasskeySignature(publicKey: Uint8Array, assertion: Assertion, signature: Uint8Array): boolean {
   if (signature.length !== 64 || toBig(signature.subarray(32)) > HALF_ORDER) return false;
-  const signed = Buffer.concat([Buffer.from(assertion.authenticatorData), createHash("sha256").update(assertion.clientDataJson).digest()]);
+  const signed = Buffer.concat([Buffer.from(assertion.authenticatorData), hash(Buffer.from(assertion.clientDataJson))]);
   try {
-    const key = createPublicKey({ key: Buffer.concat([P256_SPKI_PREFIX, Buffer.from(publicKey)]), format: "der", type: "spki" });
-    return verify("sha256", signed, { key, dsaEncoding: "ieee-p1363" }, Buffer.from(signature));
+    return p256.verify(signature, hash(signed), publicKey);
   } catch {
     return false;
   }

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Address, Keypair, scValToNative, StrKey, xdr } from "@stellar/stellar-sdk";
 import { type Authorizer, invoke, type InvokeResult, read, recordAuthContexts } from "./chain.js";
 import type { CallRecord } from "./history.js";
@@ -210,7 +209,7 @@ function toRecord(
   result: InvokeResult,
 ): CallRecord {
   return {
-    id: randomUUID(),
+    id: globalThis.crypto.randomUUID(),
     at: new Date().toISOString(),
     ...base,
     outcome: result.ok ? "success" : "failure",

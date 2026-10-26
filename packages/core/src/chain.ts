@@ -31,6 +31,11 @@ export interface ChainContext {
   sponsor: Keypair;
   /** When set, calls are submitted through it instead of being signed and paid for by the sponsor. */
   relay?: Relay;
+  /**
+   * Submits a transaction a G account has already signed, through a relayer that pays its fee (by wrapping it in a
+   * fee bump). Used by `invokeAsSource`; the account needs no XLM for fees.
+   */
+  relayTransaction?: (signedXdr: string) => Promise<{ hash: string }>;
   /** The G account whose sequence number the simulations use (any existing account); the sponsor when unset. */
   simulationSource?: string;
 }
@@ -60,16 +65,17 @@ export type InvokeResult = InvokeSuccess | InvokeFailure;
 
 const INCLUSION_FEE = "10000";
 const AUTH_VALIDITY_LEDGERS = 60;
+const RELAYED_TX_SECONDS = 55;
 
 /** Encodes the smart account's `AccSignature::Ed25519` signature for a G-key signer. */
 export function smartAccountSignature(signer: Keypair, signature: Uint8Array): xdr.ScVal {
   return ed25519SignatureScVal(signer.rawPublicKey(), signature);
 }
 
-function buildTransaction(source: Account, func: xdr.HostFunction, auth: xdr.SorobanAuthorizationEntry[]) {
-  return new TransactionBuilder(source, { fee: INCLUSION_FEE, networkPassphrase: NETWORK_PASSPHRASE })
+function buildTransaction(source: Account, func: xdr.HostFunction, auth: xdr.SorobanAuthorizationEntry[], fee = INCLUSION_FEE, timeoutSeconds = 120) {
+  return new TransactionBuilder(source, { fee, networkPassphrase: NETWORK_PASSPHRASE })
     .addOperation(Operation.invokeHostFunction({ func, auth }))
-    .setTimeout(120)
+    .setTimeout(timeoutSeconds)
     .build();
 }
 
@@ -305,7 +311,11 @@ export interface SourceInvokeParams {
 export async function invokeAsSource(ctx: ChainContext, params: SourceInvokeParams): Promise<InvokeResult> {
   const { server } = ctx;
   const hostFunction = contractCallFunction(params);
-  const tx = buildTransaction(await server.getAccount(params.sourceAddress), hostFunction, []);
+  // A relayer pays the inclusion fee in a fee bump and wants the inner transaction to carry only the resource fee
+  // and to expire within a minute, so the wallet has under a minute to sign.
+  const tx = ctx.relayTransaction
+    ? buildTransaction(await server.getAccount(params.sourceAddress), hostFunction, [], "0", RELAYED_TX_SECONDS)
+    : buildTransaction(await server.getAccount(params.sourceAddress), hostFunction, []);
 
   const simulation = await server.simulateTransaction(tx);
   if (rpc.Api.isSimulationError(simulation)) {
@@ -324,6 +334,13 @@ export async function invokeAsSource(ctx: ChainContext, params: SourceInvokePara
   const prepared = rpc.assembleTransaction(tx, simulation).build();
   const summary: CallContext[] = [{ kind: "contract", contract: params.contractId, function: params.method, args: params.args }];
   const signedXdr = await params.signTransaction(prepared.toXDR(), summary.map(describeCall));
+  if (ctx.relayTransaction) {
+    try {
+      return confirmed(server, (await ctx.relayTransaction(signedXdr)).hash);
+    } catch (error) {
+      return { ok: false, stage: "submission", error: error instanceof Error ? error.message : String(error) };
+    }
+  }
   return submitAndWait(server, TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE) as Transaction);
 }
 

@@ -1,6 +1,6 @@
-// Node-only: which master the dashboard is acting as. Demo mode uses the keys in `.env`; wallet mode
+// Which master the dashboard is acting as. Demo mode uses the keys in `.env`; wallet mode
 // uses a smart account whose master is the address of a connected wallet, with no secret stored.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+// Where the session is kept (a file, the browser) is up to the caller: see `session-file.ts`.
 import { StrKey } from "@stellar/stellar-sdk";
 
 export interface WalletAccount {
@@ -45,9 +45,15 @@ const DEFAULT: Session = { mode: "demo", delegate: "key" };
 const isPasskey = (p: Partial<PasskeyDelegate> | undefined): p is PasskeyDelegate =>
   !!p && /^04[0-9a-f]{128}$/.test(p.publicKeyHex ?? "") && !!p.rpId && !!p.credentialId;
 
-export function loadSession(path: string | URL): Session {
-  if (!existsSync(path)) return { ...DEFAULT };
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<Session>;
+/** Reads a stored session; null or anything unreadable gives the default one. */
+export function parseSession(text: string | null): Session {
+  if (!text) return { ...DEFAULT };
+  let parsed: Partial<Session>;
+  try {
+    parsed = JSON.parse(text) as Partial<Session>;
+  } catch {
+    return { ...DEFAULT };
+  }
   const wallet = parsed.wallet;
   const valid = isWalletAccount(wallet);
   const known = Array.isArray(parsed.known) ? parsed.known.filter(isWalletAccount).slice(0, MAX_KNOWN_ACCOUNTS) : [];
@@ -61,9 +67,7 @@ export function loadSession(path: string | URL): Session {
   };
 }
 
-export function saveSession(path: string | URL, session: Session): void {
-  writeFileSync(path, JSON.stringify(session, null, 2) + "\n");
-}
+export const serializeSession = (session: Session): string => JSON.stringify(session, null, 2) + "\n";
 
 /** Environment overrides that point a scenario context at the session's master. Empty in demo mode. */
 export function sessionEnv(session: Session): Record<string, string> {

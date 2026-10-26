@@ -6,18 +6,11 @@ import { type ChainContext, read } from "./chain.js";
 import { FRIENDBOT_URL, NATIVE_TOKEN_ID, NETWORK_PASSPHRASE, requireEnv } from "./config.js";
 import { deploySmartAccount } from "./deploy.js";
 import { setEnvValues } from "./envfile.js";
-import { loadSession, rememberAccount, saveSession } from "./session.js";
+import { checkWalletAccount, fundWithFriendbot } from "./account.js";
+import { rememberAccount } from "./session.js";
+import { loadSession, saveSession } from "./session-file.js";
 
 export const WASM_RELATIVE_PATH = "target/wasm32v1-none/release/smart_account.wasm";
-
-export async function fundWithFriendbot(publicKey: string): Promise<void> {
-  for (let attempt = 1; ; attempt++) {
-    const res = await fetch(`${FRIENDBOT_URL}?addr=${publicKey}`);
-    if (res.ok) return;
-    if (attempt >= 3) throw new Error(`Friendbot ${res.status}: ${await res.text()}`);
-    await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
-  }
-}
 
 export interface FreshAccountOptions {
   repoRoot: string;
@@ -51,23 +44,6 @@ export async function createFreshDemoAccount({ repoRoot, envPath, log = () => {}
   Object.assign(process.env, values);
   log(`Smart account ${contractId} deployed`);
   return { master: master.publicKey(), smartAccountId: contractId };
-}
-
-/** Whether a G account exists on testnet, and its XLM balance in stroops when it does. */
-export async function accountStatus(rpcUrl: string, address: string): Promise<{ exists: false } | { exists: true; stroops: bigint }> {
-  const server = new rpc.Server(rpcUrl);
-  try {
-    await server.getAccount(address);
-  } catch {
-    return { exists: false };
-  }
-  const tx = new TransactionBuilder(new Account(address, "0"), { fee: "100", networkPassphrase: NETWORK_PASSPHRASE })
-    .addOperation(new Contract(NATIVE_TOKEN_ID).call("balance", new Address(address).toScVal()))
-    .setTimeout(30)
-    .build();
-  const sim = await server.simulateTransaction(tx);
-  if (rpc.Api.isSimulationError(sim) || !sim.result) throw new Error("Could not read the account's XLM balance");
-  return { exists: true, stroops: BigInt(scValToNative(sim.result.retval) as bigint) };
 }
 
 export interface WalletAccountOptions {
@@ -111,24 +87,7 @@ export interface LoadWalletAccountOptions {
  * account's master is the wallet. Anything else (another owner, or not a smart account) is refused.
  */
 export async function loadWalletAccount({ ctx, sessionPath, masterAddress, smartAccountId }: LoadWalletAccountOptions) {
-  if (!StrKey.isValidEd25519PublicKey(masterAddress)) throw new Error(`"${masterAddress}" is not a Stellar G address`);
-  if (!StrKey.isValidContract(smartAccountId)) throw new Error(`"${smartAccountId}" is not a contract id (C…)`);
-
-  let onChainMaster: unknown;
-  try {
-    onChainMaster = await read(ctx, smartAccountId, "master");
-  } catch {
-    throw new Error(`${smartAccountId} is not a smart account from this project (its master() could not be read)`);
-  }
-  // The contract returns its master as the raw 32-byte ed25519 key.
-  if (!(onChainMaster instanceof Uint8Array) || onChainMaster.length !== 32) {
-    throw new Error(`${smartAccountId} is not a smart account from this project (master() did not return a key)`);
-  }
-  if (!Buffer.from(onChainMaster).equals(StrKey.decodeEd25519PublicKey(masterAddress))) {
-    throw new Error(`That smart account belongs to ${StrKey.encodeEd25519PublicKey(Buffer.from(onChainMaster))}, not to your wallet ${masterAddress}`);
-  }
-
-  const wallet = { address: masterAddress, smartAccountId };
+  const wallet = await checkWalletAccount(ctx, masterAddress, smartAccountId);
   const session = loadSession(sessionPath);
   saveSession(sessionPath, { ...session, mode: "wallet", wallet, known: rememberAccount(session.known, wallet) });
   return wallet;

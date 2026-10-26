@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hash } from "@stellar/stellar-sdk";
 import { Keypair, type xdr } from "@stellar/stellar-sdk";
 import { messageSignatureScVal } from "./policy.js";
 
@@ -18,7 +18,7 @@ export const walletMessage = (account: string, payload: Uint8Array): string =>
 
 /** What SEP-53 says is signed: sha256 of the prefix plus the message bytes. */
 export const sep53Digest = (message: string): Buffer =>
-  createHash("sha256").update(Buffer.concat([Buffer.from(SEP53_PREFIX, "utf8"), Buffer.from(message, "utf8")])).digest();
+  Buffer.from(hash(Buffer.concat([Buffer.from(SEP53_PREFIX, "utf8"), Buffer.from(message, "utf8")])));
 
 /** The part of a SEP-43 wallet (or the Wallets Kit) used here. */
 export interface MessageWallet {

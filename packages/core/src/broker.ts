@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Keypair, StrKey, Transaction, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
 import { type Authorizer, flattenInvocation } from "./chain.js";
 import { checkAssertion, derToCompactLowS, verifyPasskeySignature } from "./passkey.js";
@@ -202,7 +201,7 @@ export class SignatureBroker {
     view: (base: PendingBase) => PendingSignature,
     accept: (response: SignatureResponse) => unknown,
   ): Promise<T> {
-    const id = randomUUID();
+    const id = globalThis.crypto.randomUUID();
     const timeoutMs = req.timeoutMs ?? this.defaultTimeoutMs;
     const now = Date.now();
     const base: PendingBase = {

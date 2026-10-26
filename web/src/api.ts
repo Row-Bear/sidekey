@@ -2,7 +2,7 @@ import type { CallRequest, FunctionInfo, PreviewResult, RuleView, SignatureRespo
 import type { DemoState, RunRequest } from "./api-types";
 
 // Where the API lives: the same origin by default, or another server when the page is hosted statically.
-const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
+const API_BASE = ((import.meta.env?.VITE_API_BASE as string | undefined) ?? "").replace(/\/$/, "");
 
 export async function fetchState(): Promise<DemoState> {
   const res = await fetch(`${API_BASE}/api/state`);

@@ -1,7 +1,8 @@
 // Spike: can a smart account be created and used with no server and no fee payer of our own?
 //
-//   1. A brand-new G key (funded once by friendbot, as a wallet's account would already be) asks the on-chain factory for its smart account. Only the
-//      master's authorization is signed; OpenZeppelin's Channels service builds the transaction and pays the fee.
+//   1. A brand-new G key (funded once by friendbot, as a wallet's account would already be) asks the on-chain factory
+//      for its smart account. It signs one transaction it is the source of, as any wallet can; OpenZeppelin's Channels
+//      service wraps it in a fee bump and pays.
 //   2. The account exists at the address the factory predicted, with that key as its master.
 //   3. A policy change on the new account (signed by the master through the account's own __check_auth) also goes
 //      through Channels.
@@ -13,9 +14,9 @@
 // Run: npx tsx spikes/factory/run.ts   (needs FACTORY_ID and CHANNELS_API_KEY in .env)
 import "dotenv/config";
 import assert from "node:assert/strict";
-import { Address, Keypair, type xdr, nativeToScVal } from "@stellar/stellar-sdk";
+import { Address, Keypair, Networks, type Transaction, TransactionBuilder, type xdr, nativeToScVal } from "@stellar/stellar-sdk";
 import { ChannelsClient } from "@openzeppelin/relayer-plugin-channels";
-import { createScenarioContext, fundWithFriendbot, invoke, read, requireEnv, runPolicyOp, type Relay } from "@poc/core";
+import { createAccountViaFactory, createScenarioContext, factoryAccountAddress, findFactoryAccounts, fundWithFriendbot, read, requireEnv, runPolicyOp, type Relay } from "@poc/core";
 
 const CHANNELS_URL = process.env.CHANNELS_URL ?? "https://channels.openzeppelin.com/testnet";
 const client = new ChannelsClient({ baseUrl: CHANNELS_URL, apiKey: requireEnv("CHANNELS_API_KEY") });
@@ -40,19 +41,33 @@ const base = createScenarioContext({
 // The master (an account that exists anyway) is the simulation source, so no other account is involved.
 const ctx = { ...base, relay, simulationSource: master.publicKey() };
 
-const predicted = (await read(ctx, factory, "account_address", [new Address(master.publicKey()).toScVal(), nativeToScVal(0, { type: "u32" })])) as string;
+const predicted = await factoryAccountAddress(ctx, factory, master.publicKey(), 0);
 console.log("predicted account:", predicted);
 
-console.log("1. create() through Channels");
-const created = await invoke(ctx, {
-  contractId: factory,
-  method: "create",
-  args: [new Address(master.publicKey()).toScVal(), nativeToScVal(0, { type: "u32" })],
-  authorizers: [{ kind: "classic", address: master.publicKey(), keypair: master }],
+console.log("1. create() signed like a wallet would (a transaction the master is the source of), paid by Channels");
+const relayTransaction = async (signedXdr: string) => {
+  const result = await client.submitTransaction({ xdr: signedXdr });
+  console.log("  channels:", result.status, result.hash);
+  if (!result.hash) throw new Error(`Channels returned no transaction hash (status ${result.status})`);
+  return { hash: result.hash };
+};
+assert.deepEqual(await findFactoryAccounts(ctx, factory, master.publicKey()), [], "the master should have no account yet");
+const created = await createAccountViaFactory({
+  ctx: { ...ctx, relayTransaction },
+  factoryId: factory,
+  master: master.publicKey(),
+  index: 0,
+  signTransaction: async (unsignedXdr) => {
+    const tx = TransactionBuilder.fromXDR(unsignedXdr, Networks.TESTNET) as Transaction;
+    tx.sign(master);
+    return tx.toXDR();
+  },
 });
 assert.ok(created.ok, created.ok ? "" : `${created.stage}: ${created.error}\n${created.detail ?? ""}`);
 assert.equal(created.returnValue, predicted, "the factory returned a different address than it predicted");
 console.log("  created", created.returnValue);
+assert.deepEqual(await findFactoryAccounts(ctx, factory, master.publicKey()), [{ index: 0, smartAccountId: predicted }]);
+console.log("  found again from the master alone");
 
 console.log("2. the account's master is the new key");
 const masterBytes = (await read(ctx, predicted, "master")) as Uint8Array;
