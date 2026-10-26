@@ -77,7 +77,7 @@ npm run setup:accounts     # creates and funds the sponsor and master; creates t
 npm run deploy:account     # optional: deploys a smart account for --only/--from runs (--fresh deploys its own)
 
 npm run poc -- --fresh     # runs all 7 steps on a fresh account (--extended adds the expiry steps)
-npm run web                # dashboard at http://localhost:5173
+npm run web                # policy tester at http://localhost:5173, guided demo at http://localhost:5173/demo
 ```
 
 Secrets are written to `.env` (gitignored, testnet keys only). `.env.example`
@@ -89,7 +89,7 @@ lists every variable.
 |---|---|
 | `npm run poc -- --fresh` | New master and smart account, then steps 1-7 (add `--extended` for the expiry steps 8-9) |
 | `npm run poc -- --only N` / `--from N --to M` | Run selected steps on the current account |
-| `npm run web` | Dashboard with live balances, policy, timeline and a **Run full demo** button |
+| `npm run web` | Two pages: `/` the policy and call tester, and `/demo` the guided demo with live balances, timeline and a **Run full demo** button |
 | `npm run export:run` | Writes `docs/recorded-run.md` from `demo-run.json` |
 | `npm run typecheck` | Typechecks the Node code and the web app |
 | `npm run test:contract` / `npm run test:core` / `npm run test:web` | Contract, core and API-guard tests |
@@ -99,8 +99,23 @@ lists every variable.
 `.env`; the previous master secret is not kept, so funds left on an older smart
 account become unreachable. A full run takes about a minute.
 
+## The two pages
+
+`npm run web` serves two pages from the same dev server:
+
+- **`/` is the policy tester (MVP).** No demo keys and no demo steps. Connect your wallet, create or load a smart
+  account for it, optionally create a passkey as the delegate, set the delegate's policy in the **policy editor**
+  (which contracts, functions and arguments it may call, and for how long) and send calls in the **call builder**.
+  The master always signs in your wallet and the delegate with its passkey (or by pasted signature for another key).
+  If the guided demo left the shared session in demo-key mode, this page switches back to your wallet account.
+- **`/demo` is the guided demo.** The original page: **Run full demo**, the numbered steps and the expiry demo, with
+  demo keys held by the server as well as the wallet and passkey options. The demo script below uses this page.
+
+The two pages share one server session (`wallet-session.json`) and one server.
+
 ## Demo script (about 3 minutes)
 
+0. Open `/demo`.
 1. **Set the scene.** "A smart account whose default signer is a normal Stellar
    G key, plus a policy that lets a second key do only specific things." Open
    the dashboard and point at the policy table: master can do anything, the

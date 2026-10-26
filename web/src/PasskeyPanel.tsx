@@ -4,7 +4,7 @@ import { registerPasskey, selectDelegate } from "./api";
 import { createPasskey, passkeysSupported } from "./passkey";
 
 /** Choose who plays the delegate: the demo's own key, or a passkey created here that never leaves this device. */
-export function PasskeyPanel({ state, busy, onChanged }: { state: DemoState; busy: boolean; onChanged: () => void }) {
+export function PasskeyPanel({ demo = true, state, busy, onChanged }: { demo?: boolean; state: DemoState; busy: boolean; onChanged: () => void }) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const supported = passkeysSupported();
@@ -28,6 +28,7 @@ export function PasskeyPanel({ state, busy, onChanged }: { state: DemoState; bus
     <section className="card wallet-panel">
       <div className="section-head">
         <h2>Delegate signer</h2>
+        {demo && (
         <div className="mode-switch" role="group" aria-label="Delegate kind">
           <button className={state.delegate === "key" ? "tab active" : "tab"} disabled={busy || working || state.delegate === "key"} onClick={() => void act(() => selectDelegate("key"))}>
             Demo key
@@ -41,9 +42,12 @@ export function PasskeyPanel({ state, busy, onChanged }: { state: DemoState; bus
             Passkey
           </button>
         </div>
+        )}
       </div>
       <p className="muted small">
-        {state.delegate === "passkey"
+        {!demo && state.passkey === null
+          ? "Create a passkey to act as the delegate. Each of its calls then asks for your device (fingerprint, PIN or security key), and the smart account checks the WebAuthn signature itself. You can also register another G address as a signer in the policy editor."
+          : state.delegate === "passkey" || !demo
           ? "The delegate is a passkey: each of its calls asks for your device (fingerprint, PIN or security key). The smart account checks the WebAuthn signature itself."
           : "The delegate is a key this demo holds. Create a passkey to make the delegate a device-bound signer instead; it applies to the next smart account."}
       </p>

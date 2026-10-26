@@ -7,6 +7,8 @@ import {
   expiryText,
   fetchState,
   formatXlm,
+  selectDelegate,
+  setMasterMode,
   shortAddress,
   startRun,
   stepStatus,
@@ -40,7 +42,7 @@ function AddressLink({ address, label }: { address: string; label?: string }) {
   );
 }
 
-function Accounts({ state }: { state: DemoState }) {
+function Accounts({ state, demo }: { state: DemoState; demo: boolean }) {
   const { accounts } = state;
   const rows: [string, string, string][] = [
     ["Smart account", accounts.smartAccount, "Holds the funds; authorizes calls via its signing policy"],
@@ -49,11 +51,13 @@ function Accounts({ state }: { state: DemoState }) {
     ["Fee sponsor", accounts.sponsor, "Submits transactions and pays all fees"],
     ["Yield simulator", accounts.simulator, "Simulated yield-bearing protocol"],
   ];
+  // The plain page has no demo delegate key; its delegate is a passkey, once one exists.
+  const shown = demo || state.delegate === "passkey" ? rows : rows.filter(([name]) => name !== "Delegate signer");
   return (
     <section className="card">
       <h2>Accounts</h2>
       <dl className="accounts">
-        {rows.map(([name, address, description]) => (
+        {shown.map(([name, address, description]) => (
           <div key={name}>
             <dt>{name}</dt>
             <dd>
@@ -107,8 +111,9 @@ function ExpiryLine({ validUntil, latest }: { validUntil: number | null; latest:
   return <span className="tag">{expiryText(validUntil, latest)}</span>;
 }
 
-function Policy({ state }: { state: DemoState }) {
+function Policy({ state, demo }: { state: DemoState; demo: boolean }) {
   const policy = state.delegatePolicy;
+  const showDelegate = demo || state.delegate === "passkey";
   return (
     <section className="card">
       <h2>Signing policy</h2>
@@ -126,13 +131,14 @@ function Policy({ state }: { state: DemoState }) {
             </td>
             <td>Any call (default signer, never expires)</td>
           </tr>
+          {showDelegate && (
           <tr>
             <td>
               <span className="badge delegate">delegate</span> <AddressLink address={state.accounts.delegate} />
             </td>
             <td>
               {policy === null ? (
-                <span className="muted">Not registered yet (step 1 sets the policy)</span>
+                <span className="muted">{demo ? "Not registered yet (step 1 sets the policy)" : "Not registered yet (add a rule in the policy editor)"}</span>
               ) : (
                 <>
                   <ExpiryLine validUntil={policy.validUntilLedger} latest={state.latestLedger} />
@@ -154,6 +160,7 @@ function Policy({ state }: { state: DemoState }) {
               <span className="muted small">Everything else, including withdraw(), is refused.</span>
             </td>
           </tr>
+          )}
         </tbody>
       </table>
     </section>
@@ -213,7 +220,11 @@ function StepCard({ meta, result, running, busy, onRun }: {
   );
 }
 
-export default function App() {
+/** `demo` is the guided demo page (/demo); `mvp` is the plain policy and call tester on a wallet's account. */
+export type Variant = "demo" | "mvp";
+
+export default function App({ variant }: { variant: Variant }) {
+  const demo = variant === "demo";
   const [state, setState] = useState<DemoState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -231,6 +242,8 @@ export default function App() {
   }, []);
 
   const busy = state?.run.busy ?? false;
+  // The plain page has nothing to act on until a wallet's smart account is active.
+  const ready = state?.mode === "wallet";
   // Which header button started the current run, so only that one shows it is working (set at the click,
   // before the server reports busy).
   const [started, setStarted] = useState<string | null>(null);
@@ -245,7 +258,7 @@ export default function App() {
     }
     wasBusy.current = busy;
   }, [busy]);
-  const { data: signersData, error: signersError } = useSigners(signersVersion);
+  const { data: signersData, error: signersError } = useSigners(signersVersion, demo);
   const wallet = useWallet();
   const passkey = state?.passkey ?? null;
   const signers = useMemo(() => [...wallet.signers, ...(passkey ? [passkeySigner(passkey)] : [])], [wallet.signers, passkey]);
@@ -255,6 +268,27 @@ export default function App() {
     const timer = setInterval(() => void refresh(), busy ? 1000 : 6000);
     return () => clearInterval(timer);
   }, [refresh, busy]);
+
+  // The session is shared with the guided demo. The plain page works on a wallet's smart account with the passkey as
+  // its delegate, so it switches back to those if the demo left something else, once per situation.
+  const adjusted = useRef("");
+  useEffect(() => {
+    if (demo || !state || busy) return;
+    const fix = state.mode === "demo" && state.wallet ? "wallet" : state.delegate === "key" && state.passkey ? "passkey" : null;
+    if (fix === null) {
+      adjusted.current = "";
+      return;
+    }
+    const situation = `${fix}:${state.wallet?.smartAccountId}:${state.passkey?.publicKeyHex}`;
+    if (adjusted.current === situation) return;
+    adjusted.current = situation;
+    (fix === "wallet" ? setMasterMode("wallet") : selectDelegate("passkey"))
+      .then(() => {
+        void refresh();
+        setSignersVersion((v) => v + 1);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }, [demo, state, busy, refresh]);
 
   const start = async (request: Parameters<typeof startRun>[0]) => {
     setStarted(request.action);
@@ -285,17 +319,25 @@ export default function App() {
         <div>
           <h1>Stellar Smart Account PoC</h1>
           <p className="muted">
-            A Soroban smart account with a default G-address signer and a policy that lets a delegate call only
-            specific functions on specific contracts. Stellar testnet.
+            {demo
+              ? "A Soroban smart account with a default G-address signer and a policy that lets a delegate call only specific functions on specific contracts. Stellar testnet."
+              : "Connect your wallet to own a Soroban smart account on Stellar testnet, set a signing policy for a delegate (a passkey or another key), and send calls as the master or the delegate."}
           </p>
         </div>
         <div className="controls">
-          <button disabled={busy} onClick={() => void start({ action: "full" })}>
-            {started === "full" ? <Spinner label="Running…" /> : busy ? "Running…" : "Run full demo"}
-          </button>
-          <button className="ghost" disabled={busy} onClick={() => void start({ action: "fresh" })}>
-            {started === "fresh" ? <Spinner label="Creating…" /> : "New account only"}
-          </button>
+          {demo && (
+            <>
+              <button disabled={busy} onClick={() => void start({ action: "full" })}>
+                {started === "full" ? <Spinner label="Running…" /> : busy ? "Running…" : "Run full demo"}
+              </button>
+              <button className="ghost" disabled={busy} onClick={() => void start({ action: "fresh" })}>
+                {started === "fresh" ? <Spinner label="Creating…" /> : "New account only"}
+              </button>
+            </>
+          )}
+          <a className="nav-link" href={demo ? "/" : "/demo"}>
+            {demo ? "← Policy tester" : "Guided demo →"}
+          </a>
         </div>
       </header>
 
@@ -307,6 +349,7 @@ export default function App() {
           {state.run.label && <p className="banner running">{state.run.label}</p>}
           {state.run.lastError && <p className="error banner">{state.run.lastError}</p>}
           <WalletPanel
+            demo={demo}
             wallet={wallet}
             state={state}
             busy={busy}
@@ -318,6 +361,7 @@ export default function App() {
             }}
           />
           <PasskeyPanel
+            demo={demo}
             state={state}
             busy={busy}
             onChanged={() => {
@@ -325,18 +369,33 @@ export default function App() {
               setSignersVersion((v) => v + 1);
             }}
           />
+          {!demo && !ready && (
+            <section className="card">
+              <h2>Get started</h2>
+              <p className="muted small">
+                Connect your wallet above, then create a smart account for it or load one you already have. The policy
+                editor and call builder appear once a smart account is active.
+              </p>
+            </section>
+          )}
+          {(demo || ready) && (
+            <>
           <div className="grid">
-            <Accounts state={state} />
+            <Accounts state={state} demo={demo} />
             <Balances state={state} />
-            <Policy state={state} />
+            <Policy state={state} demo={demo} />
           </div>
 
           {signersError && <p className="error banner">{signersError}</p>}
           <div className="grid2">
-            <PolicyEditor data={signersData} busy={busy} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
-            <CallBuilder data={signersData} busy={busy} version={signersVersion} onSend={(call, via) => void start({ action: "call", call, via })} />
+            <PolicyEditor demo={demo} data={signersData} busy={busy} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
+            <CallBuilder demo={demo} data={signersData} busy={busy} version={signersVersion} onSend={(call, via) => void start({ action: "call", call, via })} />
           </div>
+            </>
+          )}
 
+          {demo && (
+            <>
           <section className="card">
             <div className="section-head">
               <h2>Demo steps</h2>
@@ -383,9 +442,10 @@ export default function App() {
               </ol>
             </section>
           )}
-
+            </>
+          )}
           {state.pendingSignatures[0] && <SigningModal request={state.pendingSignatures[0]} signers={signers} onDone={() => void refresh()} />}
-          <CallHistory calls={state.calls} />
+          {(demo || ready) && <CallHistory calls={state.calls} />}
 
           {state.run.log.length > 0 && (
             <section className="card">

@@ -15,7 +15,9 @@ function NetworkChip({ network }: { network: NonNullable<Wallet["connection"]>["
 }
 
 /** Connect a wallet, make it the master of a smart account, and switch between it and the demo keys. */
-export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }: {
+export function WalletPanel({ demo = true, wallet, state, busy, version, onStart, onChanged }: {
+  /** The guided demo can switch to keys it holds; the plain page is always the wallet. */
+  demo?: boolean;
   wallet: Wallet;
   state: DemoState;
   busy: boolean;
@@ -106,6 +108,7 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
     <section className="card wallet-panel">
       <div className="section-head">
         <h2>Master signer</h2>
+        {demo && (
         <div className="mode-switch" role="group" aria-label="Master mode">
           <button className={state.mode === "demo" ? "tab active" : "tab"} disabled={busy || state.mode === "demo"} onClick={() => void switchMode("demo")}>
             Demo keys
@@ -119,10 +122,11 @@ export function WalletPanel({ wallet, state, busy, version, onStart, onChanged }
             My wallet
           </button>
         </div>
+        )}
       </div>
 
       <p className="muted small">
-        {state.mode === "wallet"
+        {state.mode === "wallet" || !demo
           ? "The master is your wallet: its signatures are made in the wallet and the server never sees its key. Every master action asks for a signature."
           : "The master is a key this demo holds, so everything runs without prompts. Connect a wallet to be the master yourself."}
       </p>

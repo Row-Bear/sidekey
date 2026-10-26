@@ -18,25 +18,29 @@ function toExpiry(kind: ExpiryKind, value: string): ExpiryInput | null {
   return kind === "minutes" ? { kind: "minutes", minutes: n } : { kind: "ledger", ledger: Math.floor(n) };
 }
 
-export function PolicyEditor({ data, busy, onApply }: {
+export function PolicyEditor({ demo = true, data, busy, onApply }: {
+  /** The guided demo can sign with the keys it holds; the plain page always signs in the browser. */
+  demo?: boolean;
   data: SignersResponse | null;
   busy: boolean;
   onApply: (op: PolicyOp, via?: SigningVia) => void;
 }) {
   const candidates = data?.signers.filter((s) => s.label !== "master") ?? [];
   const [choice, setChoice] = useState("");
+  // Whether the user picked "another signer" themselves, as opposed to it being the fallback while there was none to pick.
+  const [pickedOther, setPickedOther] = useState(false);
   const [otherAddress, setOtherAddress] = useState("");
   const [contract, setContract] = useState("");
   const [fnName, setFnName] = useState("");
   const [constraints, setConstraints] = useState<ConstraintInput[]>([]);
   const [expiryKind, setExpiryKind] = useState<ExpiryKind>("minutes");
   const [expiryValue, setExpiryValue] = useState("30");
-  const [via, setVia] = useState<SigningVia | "demo">("demo");
+  const [via, setVia] = useState<SigningVia | "demo">(demo ? "demo" : "browser");
   const apply = (op: PolicyOp) => onApply(op, via === "browser" ? "browser" : undefined);
 
   useEffect(() => {
-    if (data && choice === "") setChoice(candidates[0]?.id ?? OTHER);
-  }, [data, choice, candidates]);
+    if (data && (choice === "" || (choice === OTHER && !pickedOther && candidates.length > 0))) setChoice(candidates[0]?.id ?? OTHER);
+  }, [data, choice, pickedOther, candidates]);
   useEffect(() => {
     if (data && contract === "") setContract(data.simulator);
   }, [data, contract]);
@@ -73,7 +77,14 @@ export function PolicyEditor({ data, busy, onApply }: {
 
       <label className="field">
         <span className="field-label">Signer</span>
-        <select value={choice} onChange={(e) => setChoice(e.target.value)} disabled={!data}>
+        <select
+          value={choice}
+          onChange={(e) => {
+            setChoice(e.target.value);
+            setPickedOther(e.target.value === OTHER);
+          }}
+          disabled={!data}
+        >
           {candidates.map((s) => (
             <option key={s.id} value={s.id}>
               {s.label} {shortAddress(s.address)}{s.registered ? "" : " (not registered yet)"}
@@ -173,7 +184,7 @@ export function PolicyEditor({ data, busy, onApply }: {
         {expiry === null && <span className="error small">Enter a number greater than zero</span>}
       </div>
 
-      <SignWith value={via} onChange={setVia} disabled={busy} />
+      {demo && <SignWith value={via} onChange={setVia} disabled={busy} />}
 
       <div className="actions">
         <button

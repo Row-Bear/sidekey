@@ -383,7 +383,8 @@ export function demoApi(repoRoot: string): Plugin {
 
           if (req.method === "GET" && path === "/signers") {
             const ctx = currentContext();
-            const [signers, ledger] = await Promise.all([listSigners(ctx), latestLedger(ctx)]);
+            const demoDelegate = new URL(req.url ?? "", "http://localhost").searchParams.get("demo") !== "0";
+            const [signers, ledger] = await Promise.all([listSigners(ctx, { demoDelegate }), latestLedger(ctx)]);
             return json(res, 200, {
               smartAccount: ctx.smartAccountId,
               simulator: ctx.simId,

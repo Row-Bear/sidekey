@@ -25,7 +25,8 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
-export const fetchSigners = () => getJson<SignersResponse>("/api/signers");
+/** `demo: false` leaves out the demo's own delegate key, which the plain page does not use. */
+export const fetchSigners = (demo = true) => getJson<SignersResponse>(demo ? "/api/signers" : "/api/signers?demo=0");
 
 export async function fetchFunctions(contract: string): Promise<FunctionInfo[]> {
   return (await getJson<{ functions: FunctionInfo[] }>(`/api/contract-functions?id=${encodeURIComponent(contract)}`)).functions;

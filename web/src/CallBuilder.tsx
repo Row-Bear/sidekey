@@ -6,7 +6,7 @@ import type { SigningVia } from "./api-types";
 import { useContractFunctions, useDebounced } from "./hooks";
 import { SignWith } from "./SignWith";
 
-function signerOptionLabel(signer: SignerView, latestLedger: number): string {
+function signerOptionLabel(signer: SignerView, latestLedger: number, demo: boolean): string {
   if (signer.label === "master") return `master ${shortAddress(signer.address)}: may authorize anything`;
   const policy = signer.policy;
   const state = !signer.registered
@@ -16,7 +16,7 @@ function signerOptionLabel(signer: SignerView, latestLedger: number): string {
       : latestLedger > policy.validUntilLedger
         ? "expired"
         : expiryText(policy.validUntilLedger, latestLedger);
-  return `${signer.label} ${shortAddress(signer.address)}: ${state}${signer.hasKey ? "" : " (no key in demo mode)"}`;
+  return `${signer.label} ${shortAddress(signer.address)}: ${state}${signer.hasKey || !demo ? "" : " (no key in demo mode)"}`;
 }
 
 function PreviewBox({ preview }: { preview: PreviewResult | "loading" | null }) {
@@ -43,7 +43,9 @@ function PreviewBox({ preview }: { preview: PreviewResult | "loading" | null }) 
   );
 }
 
-export function CallBuilder({ data, busy, version, onSend }: {
+export function CallBuilder({ demo = true, data, busy, version, onSend }: {
+  /** The guided demo can sign with the keys it holds; the plain page always signs in the browser (wallet, passkey or pasted). */
+  demo?: boolean;
   data: SignersResponse | null;
   busy: boolean;
   /** Bumps when on-chain state may have changed, so the preview refreshes. */
@@ -57,7 +59,7 @@ export function CallBuilder({ data, busy, version, onSend }: {
   const [args, setArgs] = useState<string[]>([]);
   const [signerId, setSignerId] = useState("");
   const [preview, setPreview] = useState<PreviewResult | "loading" | null>(null);
-  const [via, setVia] = useState<SigningVia | "demo">("demo");
+  const [via, setVia] = useState<SigningVia | "demo">(demo ? "demo" : "browser");
   const presetArgs = useRef<string[] | null>(null);
 
   useEffect(() => {
@@ -134,7 +136,7 @@ export function CallBuilder({ data, busy, version, onSend }: {
         <span className="field-label">Signer</span>
         <select value={signerId} onChange={(e) => setSignerId(e.target.value)} disabled={!data}>
           {data?.signers.map((s) => (
-            <option key={s.id} value={s.id} disabled={!s.hasKey && !s.viaBrowser && via !== "browser"}>{signerOptionLabel(s, data.latestLedger)}</option>
+            <option key={s.id} value={s.id} disabled={!s.hasKey && !s.viaBrowser && via !== "browser"}>{signerOptionLabel(s, data.latestLedger, demo)}</option>
           ))}
         </select>
       </label>
@@ -162,7 +164,7 @@ export function CallBuilder({ data, busy, version, onSend }: {
         />
       ))}
 
-      <SignWith value={via} onChange={setVia} disabled={busy} />
+      {demo && <SignWith value={via} onChange={setVia} disabled={busy} />}
 
       <PreviewBox preview={preview} />
 
@@ -170,7 +172,7 @@ export function CallBuilder({ data, busy, version, onSend }: {
         <button disabled={!canSend} onClick={() => request && onSend(request, via === "browser" ? "browser" : undefined)}>
           {busy ? "Working…" : rejected ? "Send anyway (expect a rejection)" : "Send"}
         </button>
-        {signer && !signer.hasKey && !signer.viaBrowser && via !== "browser" && <span className="muted small">This demo holds no key for that signer.</span>}
+        {demo && signer && !signer.hasKey && !signer.viaBrowser && via !== "browser" && <span className="muted small">This demo holds no key for that signer.</span>}
         {signer?.viaBrowser && <span className="muted small">{signer.kind === "passkey" ? "Signed with your passkey." : "Signed in your wallet."}</span>}
       </div>
     </section>

@@ -30,6 +30,7 @@ button {
   border: 1px solid var(--accent); background: var(--accent); color: #0d1117;
 }
 button.ghost { background: transparent; color: var(--accent); padding: 5px 12px; }
+.nav-link { align-self: center; font-size: 13px; white-space: nowrap; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 .working { display: inline-flex; align-items: center; gap: 8px; }
 .spinner {

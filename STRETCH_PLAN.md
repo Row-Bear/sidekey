@@ -340,6 +340,14 @@ locally before sending, accepts base64 or hex, and catches the base64 trap with 
   froze the dev server for about 5 seconds (no state, no "Deploying…" label), so `deploySmartAccount` is now
   async and the dashboard stays responsive.
 
+- Two pages: `/demo` is the full guided demo (the original page), and `/` is the plain policy and call tester: no
+  **Run full demo**, no demo-key options (master mode switch, delegate "Demo key", "Sign with demo keys") and no
+  demo steps. One `App` component takes a `variant`, so nothing is duplicated; `/api/signers?demo=0` leaves out
+  the demo's own delegate key. The plain page needs a wallet account before it shows the policy editor and call
+  builder, switches back to wallet mode and the passkey delegate if the shared session was left otherwise, and
+  signs everything in the browser. Checked by hand with a test wallet and a virtual authenticator: create and record
+  an account, create a passkey, register it in the policy editor (wallet signs as master) and send a call as it.
+
 ## Suggested cut line
 
 About 12 hours in total. If time is short, the value order is:

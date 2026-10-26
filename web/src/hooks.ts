@@ -3,19 +3,19 @@ import type { FunctionInfo } from "@poc/core";
 import { fetchFunctions, fetchSigners, looksLikeContractId, type SignersResponse } from "./api";
 
 /** The account's signers and the demo's addresses; reloads when `version` changes. */
-export function useSigners(version: number) {
+export function useSigners(version: number, demo = true) {
   const [data, setData] = useState<SignersResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetchSigners()
+    fetchSigners(demo)
       .then((result) => !cancelled && (setData(result), setError(null)))
       .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)));
     return () => {
       cancelled = true;
     };
-  }, [version]);
+  }, [version, demo]);
 
   return { data, error };
 }

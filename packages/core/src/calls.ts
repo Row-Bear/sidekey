@@ -76,12 +76,14 @@ const nameOf = (raw: Uint8Array): string =>
   raw.length === 65 ? `passkey ${hexOf(raw).slice(2, 10)}…` : StrKey.encodeEd25519PublicKey(Buffer.from(raw));
 
 /** The master, every signer registered on the account, and the delegate even before it is registered. */
-export async function listSigners(ctx: ScenarioContext): Promise<SignerView[]> {
+export async function listSigners(ctx: ScenarioContext, { demoDelegate = true }: { demoDelegate?: boolean } = {}): Promise<SignerView[]> {
   const delegate = delegateKey(ctx);
   const heldKey = hexOf(ctx.delegate.rawPublicKey());
   const registered = ((await read(ctx, ctx.smartAccountId, "list_signers")) as [string, Uint8Array][]).map(([, key]) => key);
   const rawKeys = [...registered];
-  if (!rawKeys.some((k) => hexOf(k) === hexOf(delegate))) rawKeys.push(delegate);
+  // Without the demo's delegate key, only a registered one is listed; a passkey delegate is always offered.
+  const isDemoKey = hexOf(delegate) === heldKey;
+  if ((demoDelegate || !isDemoKey) && !rawKeys.some((k) => hexOf(k) === hexOf(delegate))) rawKeys.push(delegate);
 
   const signers: SignerView[] = [
     { id: "master", label: "master", kind: "ed25519", address: ctx.master.publicKey(), hasKey: !ctx.walletMaster, viaBrowser: ctx.walletMaster, registered: true, policy: null },
