@@ -166,6 +166,8 @@ textarea { font: inherit; font-size: 13px; color: var(--text); background: #0d11
 /* ---- Wallet panel ---- */
 .wallet-panel { margin-bottom: 16px; }
 .wallet-panel .section-head { margin-bottom: 8px; }
+.subpanel + .subpanel { border-top: 1px solid var(--border); margin-top: 18px; padding-top: 18px; }
+.card > .subpanel { margin-bottom: 0; }
 .mode-switch { display: flex; gap: 6px; }
 .wallet-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; font-size: 14px; }
 .tag.ok { color: var(--ok); border-color: rgba(63, 185, 80, 0.5); }

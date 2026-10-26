@@ -42,7 +42,7 @@ function AddressLink({ address, label }: { address: string; label?: string }) {
   );
 }
 
-function Accounts({ state, demo }: { state: DemoState; demo: boolean }) {
+function Accounts({ state }: { state: DemoState }) {
   const { accounts } = state;
   const rows: [string, string, string][] = [
     ["Smart account", accounts.smartAccount, "Holds the funds; authorizes calls via its signing policy"],
@@ -51,13 +51,11 @@ function Accounts({ state, demo }: { state: DemoState; demo: boolean }) {
     ["Fee sponsor", accounts.sponsor, "Submits transactions and pays all fees"],
     ["Yield simulator", accounts.simulator, "Simulated yield-bearing protocol"],
   ];
-  // The plain page has no demo delegate key; its delegate is a passkey, once one exists.
-  const shown = demo || state.delegate === "passkey" ? rows : rows.filter(([name]) => name !== "Delegate signer");
   return (
     <section className="card">
       <h2>Accounts</h2>
       <dl className="accounts">
-        {shown.map(([name, address, description]) => (
+        {rows.map(([name, address, description]) => (
           <div key={name}>
             <dt>{name}</dt>
             <dd>
@@ -157,7 +155,7 @@ function Policy({ state, demo }: { state: DemoState; demo: boolean }) {
                   )}
                 </>
               )}
-              <span className="muted small">Everything else, including withdraw(), is refused.</span>
+              {demo && <span className="muted small">Everything else, including withdraw(), is refused.</span>}
             </td>
           </tr>
           )}
@@ -313,6 +311,35 @@ export default function App({ variant }: { variant: Variant }) {
     />
   );
 
+  // The wallet (master) and passkey (delegate) panels: two cards in the demo, one box on the plain page.
+  const renderTopPanels = (current: DemoState, embedded: boolean) => (
+    <>
+      <WalletPanel
+        embedded={embedded}
+        demo={demo}
+        wallet={wallet}
+        state={current}
+        busy={busy}
+        version={signersVersion}
+        onStart={(request) => void start(request)}
+        onChanged={() => {
+          void refresh();
+          setSignersVersion((v) => v + 1);
+        }}
+      />
+      <PasskeyPanel
+        embedded={embedded}
+        demo={demo}
+        state={current}
+        busy={busy}
+        onChanged={() => {
+          void refresh();
+          setSignersVersion((v) => v + 1);
+        }}
+      />
+    </>
+  );
+
   return (
     <main>
       <header>
@@ -348,27 +375,7 @@ export default function App({ variant }: { variant: Variant }) {
         <>
           {state.run.label && <p className="banner running">{state.run.label}</p>}
           {state.run.lastError && <p className="error banner">{state.run.lastError}</p>}
-          <WalletPanel
-            demo={demo}
-            wallet={wallet}
-            state={state}
-            busy={busy}
-            version={signersVersion}
-            onStart={(request) => void start(request)}
-            onChanged={() => {
-              void refresh();
-              setSignersVersion((v) => v + 1);
-            }}
-          />
-          <PasskeyPanel
-            demo={demo}
-            state={state}
-            busy={busy}
-            onChanged={() => {
-              void refresh();
-              setSignersVersion((v) => v + 1);
-            }}
-          />
+          {demo ? renderTopPanels(state, false) : <section className="card">{renderTopPanels(state, true)}</section>}
           {!demo && !ready && (
             <section className="card">
               <h2>Get started</h2>
@@ -381,7 +388,7 @@ export default function App({ variant }: { variant: Variant }) {
           {(demo || ready) && (
             <>
           <div className="grid">
-            <Accounts state={state} demo={demo} />
+            {demo && <Accounts state={state} />}
             <Balances state={state} />
             <Policy state={state} demo={demo} />
           </div>

@@ -15,7 +15,9 @@ function NetworkChip({ network }: { network: NonNullable<Wallet["connection"]>["
 }
 
 /** Connect a wallet, make it the master of a smart account, and switch between it and the demo keys. */
-export function WalletPanel({ demo = true, wallet, state, busy, version, onStart, onChanged }: {
+export function WalletPanel({ embedded = false, demo = true, wallet, state, busy, version, onStart, onChanged }: {
+  /** Rendered inside another card instead of as its own. */
+  embedded?: boolean;
   /** The guided demo can switch to keys it holds; the plain page is always the wallet. */
   demo?: boolean;
   wallet: Wallet;
@@ -27,6 +29,7 @@ export function WalletPanel({ demo = true, wallet, state, busy, version, onStart
   onChanged: () => void;
 }) {
   const { connection } = wallet;
+  const Wrapper = embedded ? "div" : "section";
   const [status, setStatus] = useState<WalletStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recorded, setRecorded] = useState<string[]>([]);
@@ -105,7 +108,7 @@ export function WalletPanel({ demo = true, wallet, state, busy, version, onStart
   const offTestnet = connection?.network.kind === "other";
 
   return (
-    <section className="card wallet-panel">
+    <Wrapper className={embedded ? "wallet-panel subpanel" : "card wallet-panel"}>
       <div className="section-head">
         <h2>Master signer</h2>
         {demo && (
@@ -223,6 +226,6 @@ export function WalletPanel({ demo = true, wallet, state, busy, version, onStart
         </>
       )}
       {(error || wallet.error) && <p className="error small">{error ?? wallet.error}</p>}
-    </section>
+    </Wrapper>
   );
 }

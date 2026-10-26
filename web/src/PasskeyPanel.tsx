@@ -4,7 +4,8 @@ import { registerPasskey, selectDelegate } from "./api";
 import { createPasskey, passkeysSupported } from "./passkey";
 
 /** Choose who plays the delegate: the demo's own key, or a passkey created here that never leaves this device. */
-export function PasskeyPanel({ demo = true, state, busy, onChanged }: { demo?: boolean; state: DemoState; busy: boolean; onChanged: () => void }) {
+export function PasskeyPanel({ embedded = false, demo = true, state, busy, onChanged }: { embedded?: boolean; demo?: boolean; state: DemoState; busy: boolean; onChanged: () => void }) {
+  const Wrapper = embedded ? "div" : "section";
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const supported = passkeysSupported();
@@ -25,7 +26,7 @@ export function PasskeyPanel({ demo = true, state, busy, onChanged }: { demo?: b
   const wrongSite = state.passkey !== null && state.passkey.rpId !== location.hostname;
 
   return (
-    <section className="card wallet-panel">
+    <Wrapper className={embedded ? "wallet-panel subpanel" : "card wallet-panel"}>
       <div className="section-head">
         <h2>Delegate signer</h2>
         {demo && (
@@ -68,6 +69,6 @@ export function PasskeyPanel({ demo = true, state, busy, onChanged }: { demo?: b
         </button>
       </div>
       {error && <p className="error small">{error}</p>}
-    </section>
+    </Wrapper>
   );
 }
