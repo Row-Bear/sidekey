@@ -280,15 +280,28 @@ client accepts both common encodings).
   real signatures are high-S; the server normalizes them before submission, and the contract refuses
   any that are not.
 
-### WP6: Integration, docs and recorded run (about 1.5 h)
+### WP6: Integration, docs and recorded run - done, except the manual checks
 
-- [ ] Playwright test with a **virtual authenticator** for the passkey flow; a mock wallet
-      module for the wallet flow (xBull itself is a manual check).
-- [ ] Manual checklist: xBull connect, fund, create account, sign each master step, passkey
-      registration and signing.
-- [ ] Update `.readme` (command reference, demo script variants), `docs/recorded-run.md`
-      (include the passkey and expiry steps) and the limitations section.
-- [ ] Typecheck and all contract tests green; a clean `npm run poc -- --fresh` still passes.
+- [x] End-to-end checks over HTTP on testnet: `npm run e2e:wallet` (a software wallet plays xBull) and
+      the new `npm run e2e:passkey` (a software P-256 authenticator, random high/low-S DER signatures).
+      The passkey one also checks that a wrong challenge, a wrong relying party, a missing
+      user-verification flag and a payload answer are refused and the request stays pending, that a
+      passkey for another site is refused at registration, then runs the full demo and the expiry demo
+      (claim succeeds, withdraw is refused with `NotAllowed`, the expired passkey with `SignerExpired`).
+      The passkey flow was also driven by hand in the dashboard with a Chrome virtual authenticator (WP5).
+- [x] `.readme` updated (command reference, passkey section, limitations); `docs/recorded-run.md`
+      re-recorded on the current contract with all 9 steps (`npm run poc -- --fresh --extended`).
+- [x] Typecheck, 54 contract tests, 70 core tests and 10 web tests green; the CLI run still passes with
+      the ed25519 delegate.
+- [ ] **Manual checklist (needs a real wallet or device; cannot be automated here):**
+  - xBull: connect; **Use this wallet as master** (fund first if needed); run the full demo. Check the
+    message shown is `Authorize C… payload <hash>`, that each master step is accepted, and that step 2
+    shows a transaction prompt. Switch the wallet to mainnet once and check the dashboard refuses.
+  - Freighter, if installed: the same, expecting `signAuthEntry` instead of messages.
+  - Passkey on a real device (Touch ID, Windows Hello, a phone or a security key): **Create passkey**,
+    switch the delegate to Passkey, run the full demo, then the expiry demo. If registration fails, note
+    which authenticator; it must support ES256 (P-256).
+  - Both together: a wallet master and a passkey delegate in one run.
 
 ## Suggested cut line
 

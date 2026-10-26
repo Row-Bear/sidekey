@@ -70,13 +70,13 @@ A recorded run with transaction links is in [docs/recorded-run.md](docs/recorded
 
 ```sh
 npm install
-npm run test:contract      # 34 contract unit tests
+npm run test:contract      # 54 contract unit tests
 npm run build:contract     # builds the wasm
 
 npm run setup:accounts     # creates and funds the sponsor and master; creates the delegate key
 npm run deploy:account     # optional: deploys a smart account for --only/--from runs (--fresh deploys its own)
 
-npm run poc -- --fresh     # runs all 7 steps on a fresh account
+npm run poc -- --fresh     # runs all 7 steps on a fresh account (--extended adds the expiry steps)
 npm run web                # dashboard at http://localhost:5173
 ```
 
@@ -93,7 +93,7 @@ lists every variable.
 | `npm run export:run` | Writes `docs/recorded-run.md` from `demo-run.json` |
 | `npm run typecheck` | Typechecks the Node code and the web app |
 | `npm run test:contract` / `npm run test:core` / `npm run test:web` | Contract, core and API-guard tests |
-| `npm run e2e:broker` / `npm run e2e:wallet` | End-to-end signing checks over HTTP on testnet (need `npm run web` running); the wallet one plays a wallet through the whole demo |
+| `npm run e2e:broker` / `e2e:wallet` / `e2e:passkey` | End-to-end signing checks over HTTP on testnet (need `npm run web` running); the wallet one plays a wallet through the whole demo, the passkey one plays an authenticator through the demo and the expiry demo |
 
 `--fresh` and **Run full demo** replace `MASTER_*` and `SMART_ACCOUNT_ID` in
 `.env`; the previous master secret is not kept, so funds left on an older smart

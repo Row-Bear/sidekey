@@ -6,9 +6,9 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "46a82e55fe59b7373fd64ac7e2d073114d87c9370cb083e4d7a064b57a262933",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/46a82e55fe59b7373fd64ac7e2d073114d87c9370cb083e4d7a064b57a262933",
-    "note": "delegate valid until ledger 5389077",
+    "txHash": "7a79a46da355aaedf8b71169399ae794a9d6f3e7ea5eda2b5d4b87770ea68108",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/7a79a46da355aaedf8b71169399ae794a9d6f3e7ea5eda2b5d4b87770ea68108",
+    "note": "delegate valid until ledger 5390991",
     "before": {
       "accountXlm": "0",
       "deposited": "0",
@@ -19,7 +19,7 @@
       "deposited": "0",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T22:26:17.924Z"
+    "at": "2026-10-26T01:05:48.642Z"
   },
   "2": {
     "step": 2,
@@ -28,8 +28,8 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "0f061157b906c6c2e305b84f5a2616ea415f705a44a91a747be9863e7de61126",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/0f061157b906c6c2e305b84f5a2616ea415f705a44a91a747be9863e7de61126",
+    "txHash": "66e428f991916df9bdeba7e21aa94c40111bc9bbc01f891cbabf47794a14a5bb",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/66e428f991916df9bdeba7e21aa94c40111bc9bbc01f891cbabf47794a14a5bb",
     "before": {
       "accountXlm": "0",
       "deposited": "0",
@@ -40,7 +40,7 @@
       "deposited": "0",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T22:26:22.938Z"
+    "at": "2026-10-26T01:05:58.481Z"
   },
   "3": {
     "step": 3,
@@ -49,8 +49,8 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "c9976d28ba25a3a44f8024382dfaf8621d1f2a21acf51b40d028bfd92cf98f6b",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/c9976d28ba25a3a44f8024382dfaf8621d1f2a21acf51b40d028bfd92cf98f6b",
+    "txHash": "854ce5aedd7dca728e47ff00e7aebc3f135645c24428f2081cdde1ba5f37505d",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/854ce5aedd7dca728e47ff00e7aebc3f135645c24428f2081cdde1ba5f37505d",
     "note": "depositing 9,500 XLM",
     "before": {
       "accountXlm": "95000000000",
@@ -62,7 +62,7 @@
       "deposited": "95000000000",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T22:26:28.571Z"
+    "at": "2026-10-26T01:06:02.991Z"
   },
   "4": {
     "step": 4,
@@ -71,8 +71,8 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "026b643ecec6b2a62139f466a8e10cae9b2a676e17ebd5d5ea59ad8953ad6976",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/026b643ecec6b2a62139f466a8e10cae9b2a676e17ebd5d5ea59ad8953ad6976",
+    "txHash": "ba17796376eb30e8200cb75e0d1f98ee3d78170c29ded616c7ec5aa858d0c662",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/ba17796376eb30e8200cb75e0d1f98ee3d78170c29ded616c7ec5aa858d0c662",
     "note": "accrued yield before claim: 0.001 XLM",
     "before": {
       "accountXlm": "0",
@@ -84,7 +84,7 @@
       "deposited": "95000000000",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T22:26:39.280Z"
+    "at": "2026-10-26T01:06:12.590Z"
   },
   "5": {
     "step": 5,
@@ -93,8 +93,8 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "b6987d4a0c936050330fa9f468e1b9e0dcbe24004a3634d4357b0152a11df0df",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/b6987d4a0c936050330fa9f468e1b9e0dcbe24004a3634d4357b0152a11df0df",
+    "txHash": "6effb037a0c4ec40bd41c9006e1def4e0e7592c936e2fc204a3170adbe0f164e",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/6effb037a0c4ec40bd41c9006e1def4e0e7592c936e2fc204a3170adbe0f164e",
     "note": "accrued yield before claim: 0.001 XLM",
     "before": {
       "accountXlm": "20000",
@@ -102,11 +102,11 @@
       "accruedYield": "0"
     },
     "after": {
-      "accountXlm": "50000",
+      "accountXlm": "40000",
       "deposited": "95000000000",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T22:26:52.536Z"
+    "at": "2026-10-26T01:06:22.507Z"
   },
   "6": {
     "step": 6,
@@ -116,19 +116,19 @@
     "outcome": "failure",
     "asExpected": true,
     "failureStage": "enforcing-simulation",
-    "error": "smart account CBG63ZR72B7FF7FLRDH6EGRNZ5YPNL7I4OX6CUOOCTSWHLETB5WQCRQX rejected the signature in __check_auth: NotAllowed (#3)",
+    "error": "smart account CACQI76MR5G7B5TM2INWSMZZQFTMGGKXIOEPKV34ZGUQUQ3SISEM2J2X rejected the signature in __check_auth: NotAllowed (#3)",
     "note": "withdrawing the full deposit of 9,500 XLM",
     "before": {
-      "accountXlm": "50000",
+      "accountXlm": "40000",
       "deposited": "95000000000",
       "accruedYield": "0"
     },
     "after": {
-      "accountXlm": "50000",
+      "accountXlm": "40000",
       "deposited": "95000000000",
       "accruedYield": "0"
     },
-    "at": "2026-10-25T22:26:53.963Z"
+    "at": "2026-10-26T01:06:24.065Z"
   },
   "7": {
     "step": 7,
@@ -137,20 +137,20 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "180b28aafeb347565596ae7d3617e4d8b8c6f22d7f9177ed546bda45a3f67b12",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/180b28aafeb347565596ae7d3617e4d8b8c6f22d7f9177ed546bda45a3f67b12",
+    "txHash": "b8291d7b37d34420c34e33cfc1bb5221a60200f0fccf023997f2b6dac307448a",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/b8291d7b37d34420c34e33cfc1bb5221a60200f0fccf023997f2b6dac307448a",
     "note": "withdrawing the full deposit of 9,500 XLM",
     "before": {
-      "accountXlm": "50000",
+      "accountXlm": "40000",
       "deposited": "95000000000",
       "accruedYield": "0"
     },
     "after": {
-      "accountXlm": "95000050000",
+      "accountXlm": "95000040000",
       "deposited": "0",
-      "accruedYield": "10000"
+      "accruedYield": "20000"
     },
-    "at": "2026-10-25T22:26:57.653Z"
+    "at": "2026-10-26T01:06:32.966Z"
   },
   "8": {
     "step": 8,
@@ -159,20 +159,20 @@
     "expected": "success",
     "outcome": "success",
     "asExpected": true,
-    "txHash": "ca4092fc900b3f2366127fe4f74040122f3c64834e14509cbf7d8a4bdee26f17",
-    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/ca4092fc900b3f2366127fe4f74040122f3c64834e14509cbf7d8a4bdee26f17",
-    "note": "delegate now valid until ledger 5388740",
+    "txHash": "c49e933ada700dd742a3f9abd8d89cf4da16708e700e24d0036ab54c06c4b2d9",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/tx/c49e933ada700dd742a3f9abd8d89cf4da16708e700e24d0036ab54c06c4b2d9",
+    "note": "delegate now valid until ledger 5390653",
     "before": {
-      "accountXlm": "95000050000",
+      "accountXlm": "95000040000",
       "deposited": "0",
-      "accruedYield": "10000"
+      "accruedYield": "20000"
     },
     "after": {
-      "accountXlm": "95000050000",
+      "accountXlm": "95000040000",
       "deposited": "0",
-      "accruedYield": "10000"
+      "accruedYield": "20000"
     },
-    "at": "2026-10-25T22:27:13.525Z"
+    "at": "2026-10-26T01:06:38.814Z"
   },
   "9": {
     "step": 9,
@@ -182,18 +182,18 @@
     "outcome": "failure",
     "asExpected": true,
     "failureStage": "enforcing-simulation",
-    "error": "smart account CBG63ZR72B7FF7FLRDH6EGRNZ5YPNL7I4OX6CUOOCTSWHLETB5WQCRQX rejected the signature in __check_auth: SignerExpired (#5)",
-    "note": "expired after ledger 5388740; current ledger 5388741",
+    "error": "smart account CACQI76MR5G7B5TM2INWSMZZQFTMGGKXIOEPKV34ZGUQUQ3SISEM2J2X rejected the signature in __check_auth: SignerExpired (#5)",
+    "note": "expired after ledger 5390653; current ledger 5390654",
     "before": {
-      "accountXlm": "95000050000",
+      "accountXlm": "95000040000",
       "deposited": "0",
-      "accruedYield": "10000"
+      "accruedYield": "20000"
     },
     "after": {
-      "accountXlm": "95000050000",
+      "accountXlm": "95000040000",
       "deposited": "0",
-      "accruedYield": "10000"
+      "accruedYield": "20000"
     },
-    "at": "2026-10-25T22:28:14.868Z"
+    "at": "2026-10-26T01:07:39.208Z"
   }
 }
