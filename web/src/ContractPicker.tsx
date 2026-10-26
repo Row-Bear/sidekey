@@ -38,7 +38,6 @@ export function ContractPicker({ value, onChange, book, error }: { value: string
 
   return (
     <div className="field contract-picker">
-      <span className="field-label">Contract</span>
       <select value={selected} onChange={(e) => choose(e.target.value)} aria-label="Contract">
         {book.entries.map((e) => (
           <option key={e.id} value={e.id}>

@@ -115,8 +115,8 @@ The two pages share one server session (`wallet-session.json`) and one server.
 
 ### Contract address book
 
-The policy editor and the call builder pick the contract from a short list instead of a pasted id (the guided
-demo has it too): the yield simulator, the native XLM asset contract, and the Blent fixed pool and backstop on
+One **Contract** card above the policy editor and the call builder picks the contract for both (the guided demo has
+it too), from a short list instead of a pasted id: the yield simulator, the native XLM asset contract, and the Blent fixed pool and backstop on
 testnet (`web/src/addressBook.ts`). Picking one loads its functions from chain. **Another contract** takes a pasted
 id, which you can **Save to list** under a name; your own entries can be renamed or removed and are kept in this
 browser only (local storage), so they do not follow you to another browser. Saved names also label the policy's

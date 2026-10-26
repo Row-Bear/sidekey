@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CallRequest, PreviewResult, SignerView } from "@poc/core";
+import type { CallRequest, FunctionInfo, PreviewResult, SignerView } from "@poc/core";
 import { expiryText, requestPreview, shortAddress, type SignersResponse } from "./api";
-import { useAddressBook } from "./addressBook";
 import { ArgInput } from "./ArgInput";
-import { ContractPicker } from "./ContractPicker";
 import type { SigningVia } from "./api-types";
-import { useContractFunctions, useDebounced } from "./hooks";
+import { useDebounced } from "./hooks";
 import { SignWith } from "./SignWith";
 
 function signerOptionLabel(signer: SignerView, latestLedger: number, demo: boolean): string {
@@ -45,19 +43,23 @@ function PreviewBox({ preview }: { preview: PreviewResult | "loading" | null }) 
   );
 }
 
-export function CallBuilder({ demo = true, data, busy, version, onSend }: {
+export function CallBuilder({ demo = true, data, busy, version, contract, onContractChange, functions, loading, nameOf, onSend }: {
   /** The guided demo can sign with the keys it holds; the plain page always signs in the browser (wallet, passkey or pasted). */
   demo?: boolean;
   data: SignersResponse | null;
   busy: boolean;
   /** Bumps when on-chain state may have changed, so the preview refreshes. */
   version: number;
+  /** The contract chosen in the shared picker, and its functions. */
+  contract: string;
+  onContractChange: (id: string) => void;
+  functions: FunctionInfo[];
+  loading: boolean;
+  nameOf: (id: string) => string;
   onSend: (call: CallRequest, via?: SigningVia) => void;
 }) {
   const simulator = data?.simulator ?? "";
   const account = data?.smartAccount ?? "";
-  const [contract, setContract] = useState("");
-  const book = useAddressBook(data);
   const [fnName, setFnName] = useState("");
   const [args, setArgs] = useState<string[]>([]);
   const [signerId, setSignerId] = useState("");
@@ -65,19 +67,10 @@ export function CallBuilder({ demo = true, data, busy, version, onSend }: {
   const [via, setVia] = useState<SigningVia | "demo">(demo ? "demo" : "browser");
   const presetArgs = useRef<string[] | null>(null);
 
-  // The simulator is the starting contract; after that the field is the user's.
-  const defaultedContract = useRef(false);
-  useEffect(() => {
-    if (simulator && !defaultedContract.current) {
-      defaultedContract.current = true;
-      setContract(simulator);
-    }
-  }, [simulator]);
   useEffect(() => {
     if (data && signerId === "") setSignerId(data.signers.find((s) => s.label === "delegate")?.id ?? "master");
   }, [data, signerId]);
 
-  const { functions, loading, error } = useContractFunctions(contract);
   useEffect(() => {
     if (!functions.some((f) => f.name === fnName)) setFnName(functions[0]?.name ?? "");
   }, [functions, fnName]);
@@ -115,7 +108,7 @@ export function CallBuilder({ demo = true, data, busy, version, onSend }: {
   );
   const applyExample = (e: { contract: string; fn: string; args: string[] }) => {
     presetArgs.current = e.args;
-    setContract(e.contract);
+    onContractChange(e.contract);
     setFnName(e.fn);
     setArgs(e.args);
   };
@@ -149,7 +142,7 @@ export function CallBuilder({ demo = true, data, busy, version, onSend }: {
         </select>
       </label>
 
-      <ContractPicker value={contract} onChange={setContract} book={book} error={error} />
+      <div className="muted small contract-line">Contract: <strong>{nameOf(contract.trim())}</strong> (chosen above)</div>
 
       <label className="field">
         <span className="field-label">Function {loading && <span className="muted">(loading…)</span>}</span>

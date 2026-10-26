@@ -17,7 +17,8 @@ import {
 import { CallBuilder } from "./CallBuilder";
 import { CallHistory } from "./CallHistory";
 import { useAddressBook } from "./addressBook";
-import { useSigners } from "./hooks";
+import { ContractPicker } from "./ContractPicker";
+import { useContractFunctions, useSigners } from "./hooks";
 import { PasskeyPanel } from "./PasskeyPanel";
 import { passkeySigner } from "./passkey";
 import { PolicyEditor } from "./PolicyEditor";
@@ -258,6 +259,16 @@ export default function App({ variant }: { variant: Variant }) {
   }, [busy]);
   const { data: signersData, error: signersError } = useSigners(signersVersion, demo);
   const book = useAddressBook(signersData);
+  // One contract for both the policy editor and the call builder; the simulator is the starting choice.
+  const [contract, setContract] = useState("");
+  const defaultedContract = useRef(false);
+  useEffect(() => {
+    if (signersData && !defaultedContract.current) {
+      defaultedContract.current = true;
+      setContract(signersData.simulator);
+    }
+  }, [signersData]);
+  const contractFunctions = useContractFunctions(contract);
   const wallet = useWallet();
   const passkey = state?.passkey ?? null;
   const signers = useMemo(() => [...wallet.signers, ...(passkey ? [passkeySigner(passkey)] : [])], [wallet.signers, passkey]);
@@ -397,17 +408,19 @@ export default function App({ variant }: { variant: Variant }) {
                 <Policy state={state} demo={demo} nameOf={book.nameOf} />
               </>
             ) : (
-              <>
-                <Policy state={state} demo={demo} nameOf={book.nameOf} />
-                <Balances state={state} />
-              </>
+              <Policy state={state} demo={demo} nameOf={book.nameOf} />
             )}
           </div>
 
           {signersError && <p className="error banner">{signersError}</p>}
+          <section className="card">
+            <h2>Contract</h2>
+            <p className="muted small">The policy editor and the call builder below both work on this contract.</p>
+            <ContractPicker value={contract} onChange={setContract} book={book} error={contractFunctions.error} />
+          </section>
           <div className="grid2">
-            <PolicyEditor demo={demo} data={signersData} busy={busy} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
-            <CallBuilder demo={demo} data={signersData} busy={busy} version={signersVersion} onSend={(call, via) => void start({ action: "call", call, via })} />
+            <PolicyEditor demo={demo} data={signersData} busy={busy} contract={contract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onApply={(policy, via) => void start({ action: "policy", policy, via })} />
+            <CallBuilder demo={demo} data={signersData} busy={busy} version={signersVersion} contract={contract} onContractChange={setContract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onSend={(call, via) => void start({ action: "call", call, via })} />
           </div>
             </>
           )}

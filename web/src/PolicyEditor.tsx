@@ -1,11 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import type { ConstraintInput, ExpiryInput, PolicyOp, RuleView } from "@poc/core";
+import { useEffect, useState } from "react";
+import type { ConstraintInput, ExpiryInput, FunctionInfo, PolicyOp, RuleView } from "@poc/core";
 import { describeRule, expiryText, shortAddress, type SignersResponse } from "./api";
-import { useAddressBook } from "./addressBook";
 import { ArgInput } from "./ArgInput";
-import { ContractPicker } from "./ContractPicker";
 import type { SigningVia } from "./api-types";
-import { useContractFunctions } from "./hooks";
 import { SignWith } from "./SignWith";
 
 const LEDGERS_PER_MINUTE = 12;
@@ -20,11 +17,16 @@ function toExpiry(kind: ExpiryKind, value: string): ExpiryInput | null {
   return kind === "minutes" ? { kind: "minutes", minutes: n } : { kind: "ledger", ledger: Math.floor(n) };
 }
 
-export function PolicyEditor({ demo = true, data, busy, onApply }: {
+export function PolicyEditor({ demo = true, data, busy, contract, functions, loading, nameOf, onApply }: {
   /** The guided demo can sign with the keys it holds; the plain page always signs in the browser. */
   demo?: boolean;
   data: SignersResponse | null;
   busy: boolean;
+  /** The contract chosen in the shared picker, and its functions. */
+  contract: string;
+  functions: FunctionInfo[];
+  loading: boolean;
+  nameOf: (id: string) => string;
   onApply: (op: PolicyOp, via?: SigningVia) => void;
 }) {
   const candidates = data?.signers.filter((s) => s.label !== "master") ?? [];
@@ -32,8 +34,6 @@ export function PolicyEditor({ demo = true, data, busy, onApply }: {
   // Whether the user picked "another signer" themselves, as opposed to it being the fallback while there was none to pick.
   const [pickedOther, setPickedOther] = useState(false);
   const [otherAddress, setOtherAddress] = useState("");
-  const [contract, setContract] = useState("");
-  const book = useAddressBook(data);
   const [fnName, setFnName] = useState("");
   const [constraints, setConstraints] = useState<ConstraintInput[]>([]);
   const [expiryKind, setExpiryKind] = useState<ExpiryKind>("minutes");
@@ -44,16 +44,6 @@ export function PolicyEditor({ demo = true, data, busy, onApply }: {
   useEffect(() => {
     if (data && (choice === "" || (choice === OTHER && !pickedOther && candidates.length > 0))) setChoice(candidates[0]?.id ?? OTHER);
   }, [data, choice, pickedOther, candidates]);
-  // The simulator is the starting contract; after that the field is the user's.
-  const defaultedContract = useRef(false);
-  useEffect(() => {
-    if (data && !defaultedContract.current) {
-      defaultedContract.current = true;
-      setContract(data.simulator);
-    }
-  }, [data]);
-
-  const { functions, loading, error } = useContractFunctions(contract);
   useEffect(() => {
     if (!functions.some((f) => f.name === fnName)) setFnName(functions[0]?.name ?? "");
   }, [functions, fnName]);
@@ -119,7 +109,7 @@ export function PolicyEditor({ demo = true, data, busy, onApply }: {
           <ul>
             {selected.policy.rules.map((rule: RuleView) => (
               <li key={`${rule.contract}.${rule.function}.${rule.args.map((a) => a.kind).join()}`}>
-                <code>{describeRule(rule)}</code> <span className="muted small">on {book.nameOf(rule.contract)}</span>
+                <code>{describeRule(rule)}</code> <span className="muted small">on {nameOf(rule.contract)}</span>
                 <button
                   className="ghost small-btn"
                   disabled={busy}
@@ -134,7 +124,7 @@ export function PolicyEditor({ demo = true, data, busy, onApply }: {
       )}
 
       <h3>Allow a call</h3>
-      <ContractPicker value={contract} onChange={setContract} book={book} error={error} />
+      <div className="muted small contract-line">Contract: <strong>{nameOf(contract.trim())}</strong> (chosen above)</div>
       <label className="field">
         <span className="field-label">Function {loading && <span className="muted">(loading…)</span>}</span>
         <select value={fnName} onChange={(e) => setFnName(e.target.value)} disabled={functions.length === 0}>
