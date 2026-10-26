@@ -389,8 +389,18 @@ export default function App({ variant }: { variant: Variant }) {
             <>
           <div className="grid">
             {demo && <Accounts state={state} />}
-            <Balances state={state} />
-            <Policy state={state} demo={demo} />
+            {/* On the plain page the policy sits on the left, directly above the policy editor. */}
+            {demo ? (
+              <>
+                <Balances state={state} />
+                <Policy state={state} demo={demo} />
+              </>
+            ) : (
+              <>
+                <Policy state={state} demo={demo} />
+                <Balances state={state} />
+              </>
+            )}
           </div>
 
           {signersError && <p className="error banner">{signersError}</p>}
