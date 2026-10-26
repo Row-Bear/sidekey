@@ -141,8 +141,8 @@ Switch back with **Demo keys** at any time.
 The wallet shows `Authorize <smart account> payload <hash>` for auth entries, which does not say which call is
 approved; the signing dialog in the dashboard lists the exact calls first.
 
-**Not yet tried with the real xBull extension** (tested with test wallets that copy its behaviour). See the manual
-check in [STRETCH_PLAN.md](STRETCH_PLAN.md) under WP4.
+Tried by hand with the real xBull extension on testnet (full demo, all steps as expected); Freighter is untested
+(see the manual checklist in [STRETCH_PLAN.md](STRETCH_PLAN.md) under WP6).
 
 ## Passkey delegate
 

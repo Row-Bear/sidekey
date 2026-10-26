@@ -113,9 +113,7 @@ expiry), `packages/core/src/wallet.ts` with mock xBull-style and strict-SEP-53 w
 testnet run where set_expiry, deposit (nested transfer), claim and withdraw were all authorized
 by message signatures (`spikes/wallet-sep43/message.ts`). The client checks the wallet's signature
 locally before sending, accepts base64 or hex, and catches the base64 trap with a clear error.
-**Not yet verified against the real xBull extension**: that needs its popup and a funded wallet
-account, so it moves to WP4 as a manual check (how it encodes the signature is unconfirmed; the
-client accepts both common encodings).
+**Verified by hand against the real xBull extension in WP4/WP6** (full demo, all steps as expected).
 
 ### WP1: Contract v2 with expiry (goal 1; about 3 h) — done
 
@@ -209,7 +207,7 @@ client accepts both common encodings).
   The modal prints call arguments as plain values, so a signer enum shows as
   `["Ed25519","0x…"]`.
 
-### WP4: Wallet connection, xBull (goal 4; about 2.5 h) — done, real xBull still to check by hand
+### WP4: Wallet connection, xBull (goal 4; about 2.5 h) — done, real xBull verified by hand
 
 - [x] **Wallets Kit** (`@creit.tech/stellar-wallets-kit` 2.7.1) in `web/`, with only the xBull and
       Freighter modules bundled (plus dev test wallets). The kit's own connect modal is used.
@@ -239,7 +237,7 @@ client accepts both common encodings).
       full run with the same wallet) and `spikes/broker/transaction.ts`. In the dashboard with the
       test wallet: connect through the kit, fund, create the account, full demo (4 message prompts
       and 1 transaction prompt, all steps as expected), and the Freighter-like path for a policy edit.
-- [ ] **Manual check with the real xBull extension** (cannot be automated here): connect; make sure
+- [x] **Manual check with the real xBull extension** (done by hand: full demo on a wallet-owned smart account, 5 prompts, every step as expected): connect; make sure
       the message shown is `Authorize C… payload <hash>`; confirm it signs, and that the dashboard
       accepts the signature (the server accepts base64 or hex); confirm step 2's transaction prompt.
       Repeat with Freighter if installed (it should use `signAuthEntry`).
@@ -294,10 +292,10 @@ client accepts both common encodings).
 - [x] Typecheck, 54 contract tests, 70 core tests and 10 web tests green; the CLI run still passes with
       the ed25519 delegate.
 - [ ] **Manual checklist (needs a real wallet or device; cannot be automated here):**
-  - xBull: connect; **Use this wallet as master** (fund first if needed); run the full demo. Check the
+  - [x] xBull (done by hand, all as expected): connect; **Use this wallet as master** (fund first if needed); run the full demo. Check the
     message shown is `Authorize C… payload <hash>`, that each master step is accepted, and that step 2
     shows a transaction prompt. Switch the wallet to mainnet once and check the dashboard refuses.
-  - Freighter, if installed: the same, expecting `signAuthEntry` instead of messages.
+  - [ ] Freighter, if installed: the same, expecting `signAuthEntry` instead of messages.
   - [x] Passkey from a **password-manager extension** in a real browser: created, full demo and expiry
     demo as expected (claim succeeded, withdraw refused with `NotAllowed`, expired passkey refused with
     `SignerExpired`). The extension's own client data and user-verification flag satisfy the contract's
@@ -316,8 +314,8 @@ WP3 is cheap and unlocks both wallet and passkey, so do it right after WP2.
 ## Risks and open items
 
 - **Wallet support differs**: xBull cannot `signAuthEntry`; it uses `signMessage` (above).
-  Freighter supports `signAuthEntry`. The message path is verified with mocks and on-chain, but
-  not yet with the real xBull extension.
+  Freighter supports `signAuthEntry`. The message path is verified with mocks, on-chain and by hand
+  with the real xBull extension; Freighter is untested.
 - **Blind signing**: a wallet shows `Authorize <account> payload <hash>`, so the user cannot
   see which call they approve; the dashboard's call summary is the only readable description.
 - **Passkey signature format**: DER to compact conversion and low-S normalization are the
