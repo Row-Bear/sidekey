@@ -15,6 +15,8 @@ export interface SignersResponse {
   /** The master's G address (a connected wallet in wallet mode). */
   master: string;
   latestLedger: number;
+  /** What this smart account's contract can enforce; older accounts lack some features. */
+  features: { lessThan: boolean };
   signers: SignerView[];
 }
 
@@ -123,15 +125,27 @@ export type StepStatus = "pending" | "running" | "succeeded" | "blocked" | "unex
 const SECONDS_PER_LEDGER = 5;
 
 /** e.g. "expires in about 12 min (ledger 5,389,030)". */
+/** A rough duration: seconds, minutes, hours or days, whichever reads best. */
+export function durationText(seconds: number): string {
+  const minutes = seconds / 60;
+  if (seconds < 90) return `${Math.max(Math.round(seconds), 0)} s`;
+  if (minutes < 90) return `${Math.round(minutes)} min`;
+  const hours = minutes / 60;
+  if (hours < 36) return `${Number(hours.toFixed(1))} h`;
+  return `${Number((hours / 24).toFixed(1))} days`;
+}
+
 export function expiryText(validUntil: number, latest: number): string {
   const seconds = (validUntil - latest) * SECONDS_PER_LEDGER;
-  const left = seconds < 90 ? `${Math.max(seconds, 0)} s` : `${Math.round(seconds / 60)} min`;
+  const left = durationText(seconds);
   return `expires in about ${left} (ledger ${validUntil.toLocaleString("en-US")})`;
 }
 
 /** Human-readable rule, e.g. `claim(this account)` or `withdraw(this account, any)`. */
 export function describeRule(rule: RuleView): string {
-  const args = rule.args.map((a) => (a.kind === "self" ? "this account" : a.kind === "any" ? "any" : `= ${a.display}`));
+  const args = rule.args.map((a) =>
+    a.kind === "self" ? "this account" : a.kind === "any" ? "any" : a.kind === "lessThan" ? `< ${a.limit}` : `= ${a.display}`,
+  );
   return `${rule.function}(${args.join(", ")})`;
 }
 

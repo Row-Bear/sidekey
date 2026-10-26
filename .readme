@@ -16,7 +16,8 @@ while the master can do both.
   - A valid ed25519 signature from the master authorizes any call.
   - A delegate is authorized only if **every** invocation in the authorized tree
     matches one of its rules `(contract, function, argument constraints)`. A rule
-    has one constraint per argument: any value, "this account", or an exact value.
+    has one constraint per argument: any value, "this account", an exact value, or an
+    integer below a limit.
     So the delegate can `claim(user)` only for this account, and a call with a
     different number of arguments never matches.
   - Each delegate has an optional **expiry ledger**. After that ledger the signer
@@ -70,7 +71,7 @@ A recorded run with transaction links is in [docs/recorded-run.md](docs/recorded
 
 ```sh
 npm install
-npm run test:contract      # 54 contract unit tests
+npm run test:contract      # 65 contract unit tests
 npm run build:contract     # builds the wasm
 
 npm run setup:accounts     # creates and funds the sponsor and master; creates the delegate key
@@ -112,6 +113,18 @@ account become unreachable. A full run takes about a minute.
   demo keys held by the server as well as the wallet and passkey options. The demo script below uses this page.
 
 The two pages share one server session (`wallet-session.json`) and one server.
+
+### Rules and expiry in the policy editor
+
+A rule allows one function on one contract, with a constraint for each argument: **any value**, **this account**
+(for addresses), **exactly…** a value, or **less than…** a limit (for integers, strictly below it, with no lower
+bound; XLM amounts are in stroops). Rules for the same function are alternatives, so a call is allowed if any one
+matches; remove the old rule to replace it (the editor warns when one exists). The expiry can be in minutes, hours
+or days, or at a ledger. A signer whose expiry is more than about 30 days away may stop working earlier, because
+the account's stored policy lives about 30 days after the last policy change.
+
+"Less than" needs a smart account created with this version of the contract (it reports `version()` 3). Older
+accounts cannot enforce it, so the editor greys the option out for them and refuses the rule.
 
 ### Contract address book
 
@@ -220,8 +233,9 @@ This is a hackathon PoC, not audited, and testnet only.
 - One master key with no rotation or recovery; the master is ed25519 (a demo key or a wallet). The delegate is
   ed25519 held by the demo, or a passkey that never leaves your device. Passkey verification is custom code
   and has not been audited.
-- Policy is an allowlist with per-signer expiry and per-argument constraints; there are
-  no spend limits or rate limits.
+- Policy is an allowlist with per-signer expiry and per-argument constraints (any value, this account, exactly a
+  value, or an integer below a limit); there are no cumulative spend limits or rate limits. A "less than" limit
+  applies to each call on its own, so it does not stop many small calls from adding up.
 - The contract extends its own storage lifetime to about 30 days on deploy and on
   policy changes only; a long-idle account would need its TTL extended.
 - The dashboard's run endpoint is a dev-server feature that holds testnet secrets server

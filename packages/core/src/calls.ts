@@ -8,8 +8,10 @@ import {
   describeRule,
   evaluateCalls,
   optionLedgerScVal,
+  parseLimit,
   parseSignerPolicy,
   type RuleInput,
+  type RuleView,
   ruleScVal,
   rulesScVal,
   signerIdScVal,
@@ -264,9 +266,27 @@ export async function runCall(ctx: ScenarioContext, req: CallRequest, signing?: 
 
 // ---- Policy edits (always signed by the master) ----
 
+/** The contract version that added the "less than" argument constraint. */
+const LESS_THAN_VERSION = 3;
+
+export interface AccountFeatures {
+  /** Whether the account can enforce "less than". Accounts deployed earlier have no `version` function at all. */
+  lessThan: boolean;
+}
+
+/** What the current smart account's contract supports. */
+export async function accountFeatures(ctx: ScenarioContext): Promise<AccountFeatures> {
+  try {
+    const version = await read(ctx, ctx.smartAccountId, "version");
+    return { lessThan: typeof version === "number" && version >= LESS_THAN_VERSION };
+  } catch {
+    return { lessThan: false };
+  }
+}
+
 export interface ConstraintInput {
-  kind: "any" | "self" | "exact";
-  /** For "exact": the value, typed as for the call builder. */
+  kind: "any" | "self" | "exact" | "lessThan";
+  /** For "exact": the value, typed as for the call builder. For "lessThan": a whole number, the exclusive limit. */
   value?: string;
 }
 
@@ -302,6 +322,10 @@ async function buildRule(ctx: ScenarioContext, op: Extract<PolicyOp, { op: "allo
       if (argKind(input.type) !== "address") throw new Error(`${name}: "this account" only applies to address arguments`);
       return { kind: "self" };
     }
+    if (constraint.kind === "lessThan") {
+      if (argKind(input.type) !== "integer") throw new Error(`${name}: "less than" only applies to integer arguments`);
+      return { kind: "lessThan", limit: parseLimit(constraint.value ?? "") };
+    }
     return { kind: "exact", value: encodeArg(spec, name, input.type, constraint.value ?? "") };
   });
   return { contract: op.contract, function: op.function, args };
@@ -314,8 +338,12 @@ function describePolicyOp(ctx: ScenarioContext, op: PolicyOp): string {
       const view = {
         contract: op.contract,
         function: op.function,
-        args: op.constraints.map((c) =>
-          c.kind === "exact" ? { kind: "exact" as const, display: c.value ?? "", xdrHex: "" } : { kind: c.kind },
+        args: op.constraints.map((c): RuleView["args"][number] =>
+          c.kind === "exact"
+            ? { kind: "exact", display: c.value ?? "", xdrHex: "" }
+            : c.kind === "lessThan"
+              ? { kind: "lessThan", limit: (c.value ?? "").trim() }
+              : { kind: c.kind },
         ),
       };
       return `Allow ${who}: ${describeRule(view)}`;
@@ -344,6 +372,11 @@ export async function runPolicyOp(ctx: ScenarioContext, op: PolicyOp, signing?: 
     let args: xdr.ScVal[];
     switch (op.op) {
       case "allow": {
+        if (op.constraints.some((c) => c.kind === "lessThan") && !(await accountFeatures(ctx)).lessThan) {
+          throw new Error(
+            'This smart account was deployed before the "less than" constraint existed, so it cannot enforce it. Create a new smart account to use it.',
+          );
+        }
         const rule = await buildRule(ctx, op);
         const existing = await readPolicy(ctx, signer.raw);
         if (existing === null && signer.raw.length === 65) {

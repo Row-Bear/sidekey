@@ -285,6 +285,170 @@ fn zero_argument_functions_can_be_allowed() {
     assert_eq!(delegate_claims(&f), Err(Ok(AccError::NotAllowed)));
 }
 
+// ---- LessThan ----
+
+#[test]
+fn version_tells_clients_that_less_than_is_supported() {
+    let f = setup();
+    assert_eq!(f.client.version(), 3);
+}
+
+/// `poke(value)` on the simulator, allowed only for integers below `limit`.
+fn allow_poke_below(f: &Fixture, limit: i128) {
+    let rule = Rule {
+        contract: f.sim.clone(),
+        function: symbol_short!("poke"),
+        args: vec![&f.env, ArgConstraint::LessThan(limit)],
+    };
+    set_delegate(f, None, vec![&f.env, rule]);
+}
+
+fn poke(f: &Fixture, value: Val) -> CheckResult {
+    check(f, &f.delegate, vec![&f.env, call_with(&f.sim, symbol_short!("poke"), vec![&f.env, value])])
+}
+
+#[test]
+fn less_than_is_strict() {
+    let f = setup();
+    allow_poke_below(&f, 100);
+    assert_eq!(poke(&f, 99i128.into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, 100i128.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, 101i128.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, i128::MAX.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn less_than_sets_no_lower_bound() {
+    let f = setup();
+    allow_poke_below(&f, 100);
+    assert_eq!(poke(&f, 0i128.into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, (-1i128).into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, i128::MIN.into_val(&f.env)), Ok(()));
+}
+
+#[test]
+fn less_than_works_with_a_negative_limit_and_the_extremes() {
+    let f = setup();
+    allow_poke_below(&f, -5);
+    assert_eq!(poke(&f, (-6i128).into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, (-5i128).into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, 0i128.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+
+    allow_poke_below(&f, i128::MIN);
+    assert_eq!(poke(&f, i128::MIN.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+
+    allow_poke_below(&f, i128::MAX);
+    assert_eq!(poke(&f, (i128::MAX - 1).into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, i128::MAX.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn less_than_compares_every_integer_type() {
+    let f = setup();
+    allow_poke_below(&f, 100);
+    assert_eq!(poke(&f, 99u32.into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, 100u32.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, 99i32.into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, (-7i32).into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, 100i32.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, 99u64.into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, 100u64.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, u64::MAX.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, 99i64.into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, i64::MIN.into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, 100i64.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, 99u128.into_val(&f.env)), Ok(()));
+    assert_eq!(poke(&f, 100u128.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn less_than_refuses_a_u128_that_does_not_fit() {
+    let f = setup();
+    allow_poke_below(&f, i128::MAX);
+    // Above i128::MAX, so not below the limit, and it must not wrap around to a small or negative number.
+    assert_eq!(poke(&f, u128::MAX.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, (i128::MAX as u128 + 1).into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn less_than_refuses_arguments_that_are_not_integers() {
+    let f = setup();
+    allow_poke_below(&f, 100);
+    let me = f.client.address.clone();
+    assert_eq!(poke(&f, me.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, symbol_short!("small").into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, true.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, ().into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, soroban_sdk::Bytes::from_array(&f.env, &[1, 2]).into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, soroban_sdk::String::from_str(&f.env, "5").into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn less_than_combines_with_other_constraints() {
+    let f = setup();
+    let rule = Rule {
+        contract: f.sim.clone(),
+        function: symbol_short!("transfer"),
+        args: vec![&f.env, ArgConstraint::SelfAddress, ArgConstraint::Any, ArgConstraint::LessThan(1_000)],
+    };
+    set_delegate(&f, None, vec![&f.env, rule]);
+    let me = f.client.address.clone();
+    let other = Address::generate(&f.env);
+    let transfer = |from: &Address, amount: i128| {
+        vec![
+            &f.env,
+            call_with(
+                &f.sim,
+                symbol_short!("transfer"),
+                vec![&f.env, from.into_val(&f.env), other.into_val(&f.env), amount.into_val(&f.env)],
+            ),
+        ]
+    };
+    assert_eq!(check(&f, &f.delegate, transfer(&me, 999)), Ok(()));
+    assert_eq!(check(&f, &f.delegate, transfer(&me, 1_000)), Err(Ok(AccError::NotAllowed)));
+    // A small amount from someone else's account is still refused by the other constraint.
+    assert_eq!(check(&f, &f.delegate, transfer(&other, 1)), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn less_than_applies_to_every_call_in_one_authorization() {
+    let f = setup();
+    allow_poke_below(&f, 100);
+    let ok = call_with(&f.sim, symbol_short!("poke"), vec![&f.env, 5i128.into_val(&f.env)]);
+    let too_big = call_with(&f.sim, symbol_short!("poke"), vec![&f.env, 500i128.into_val(&f.env)]);
+    assert_eq!(check(&f, &f.delegate, vec![&f.env, ok.clone(), ok.clone()]), Ok(()));
+    assert_eq!(check(&f, &f.delegate, vec![&f.env, ok, too_big]), Err(Ok(AccError::NotAllowed)));
+}
+
+#[test]
+fn less_than_is_stored_and_rules_for_one_function_are_alternatives() {
+    let f = setup();
+    allow_poke_below(&f, 100);
+    let stored = f.client.get_signer(&delegate_id(&f)).unwrap();
+    assert_eq!(stored.rules.get(0).unwrap().args.get(0).unwrap(), ArgConstraint::LessThan(100));
+
+    // A second rule for the same function is an alternative: either one allows the call, so a tighter
+    // limit only takes effect once the looser rule is removed.
+    let tighter = Rule { contract: f.sim.clone(), function: symbol_short!("poke"), args: vec![&f.env, ArgConstraint::LessThan(10)] };
+    f.env.mock_all_auths();
+    f.client.add_rule(&delegate_id(&f), &tighter);
+    assert_eq!(f.client.get_signer(&delegate_id(&f)).unwrap().rules.len(), 2);
+    assert_eq!(poke(&f, 50i128.into_val(&f.env)), Ok(()));
+
+    f.client.remove_rule(&delegate_id(&f), &f.sim, &symbol_short!("poke"));
+    f.client.add_rule(&delegate_id(&f), &tighter);
+    assert_eq!(poke(&f, 50i128.into_val(&f.env)), Err(Ok(AccError::NotAllowed)));
+    assert_eq!(poke(&f, 9i128.into_val(&f.env)), Ok(()));
+}
+
+#[test]
+fn less_than_does_not_limit_the_master() {
+    let f = setup();
+    allow_poke_below(&f, 1);
+    let huge = vec![&f.env, call_with(&f.sim, symbol_short!("poke"), vec![&f.env, i128::MAX.into_val(&f.env)])];
+    assert_eq!(check(&f, &f.master, huge), Ok(()));
+}
+
 // ---- Expiry ----
 
 #[test]

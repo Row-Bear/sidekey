@@ -5,7 +5,7 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype,
     crypto::Hash,
     xdr::ToXdr,
-    Address, Bytes, BytesN, Env, Symbol, TryFromVal, Vec,
+    Address, Bytes, BytesN, Env, Symbol, TryFromVal, Val, Vec,
 };
 
 // About 30 days of ledgers at ~5s each.
@@ -15,6 +15,10 @@ const TTL_EXTEND_TO: u32 = 535_680;
 // Bounds keep the work done in `__check_auth` small and predictable.
 const MAX_RULES: u32 = 32;
 const MAX_ARGS: u32 = 16;
+
+/// What this contract supports, so a client can tell an older account from this one (older ones have no
+/// `version` function at all). 3 adds the `LessThan` argument constraint.
+const CONTRACT_VERSION: u32 = 3;
 
 #[contracttype]
 enum DataKey {
@@ -42,6 +46,9 @@ pub enum ArgConstraint {
     SelfAddress,
     /// The argument must equal this XDR-encoded value.
     Exact(Bytes),
+    /// The argument must be an integer (of any integer type) strictly less than this value.
+    /// Arguments of any other type never match. It sets no lower bound, so negative values match.
+    LessThan(i128),
 }
 
 /// One permitted call. `args` has one constraint per call argument: a call with a
@@ -123,6 +130,10 @@ impl SmartAccount {
         env.storage().instance().set(&DataKey::Master, &master);
         env.storage().instance().set(&DataKey::Signers, &Vec::<SignerId>::new(&env));
         Self::bump(&env);
+    }
+
+    pub fn version(_env: Env) -> u32 {
+        CONTRACT_VERSION
     }
 
     pub fn master(env: Env) -> BytesN<32> {
@@ -388,6 +399,26 @@ fn verify_passkey(env: &Env, rp_id_hash: &BytesN<32>, payload: &BytesN<32>, sig:
     Ok(())
 }
 
+/// A call argument of any integer type as an `i128`; `None` for other types, and for a `u128` too big to fit.
+fn integer_arg(env: &Env, arg: &Val) -> Option<i128> {
+    if let Ok(value) = i128::try_from_val(env, arg) {
+        return Some(value);
+    }
+    if let Ok(value) = u128::try_from_val(env, arg) {
+        return i128::try_from(value).ok();
+    }
+    if let Ok(value) = i64::try_from_val(env, arg) {
+        return Some(value.into());
+    }
+    if let Ok(value) = u64::try_from_val(env, arg) {
+        return Some(value.into());
+    }
+    if let Ok(value) = i32::try_from_val(env, arg) {
+        return Some(value.into());
+    }
+    u32::try_from_val(env, arg).ok().map(Into::into)
+}
+
 fn rule_allows(env: &Env, me: &Address, rule: &Rule, call: &ContractContext) -> bool {
     if rule.contract != call.contract || rule.function != call.fn_name || rule.args.len() != call.args.len() {
         return false;
@@ -397,6 +428,7 @@ fn rule_allows(env: &Env, me: &Address, rule: &Rule, call: &ContractContext) -> 
             ArgConstraint::Any => true,
             ArgConstraint::SelfAddress => Address::try_from_val(env, &arg).map_or(false, |a| a == *me),
             ArgConstraint::Exact(expected) => arg.to_xdr(env) == expected,
+            ArgConstraint::LessThan(limit) => integer_arg(env, &arg).map_or(false, |value| value < limit),
         };
         if !satisfied {
             return false;

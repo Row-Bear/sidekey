@@ -6,7 +6,21 @@ import { Address, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk
 export type ArgConstraintInput =
   | { kind: "any" }
   | { kind: "self" }
-  | { kind: "exact"; value: xdr.ScVal };
+  | { kind: "exact"; value: xdr.ScVal }
+  /** An integer argument (any integer type) strictly below `limit`. */
+  | { kind: "lessThan"; limit: bigint };
+
+const INT128_MIN = -(2n ** 127n);
+const INT128_MAX = 2n ** 127n - 1n;
+
+/** A whole number that fits the contract's `i128` limit, from text; throws a readable message otherwise. */
+export function parseLimit(text: string): bigint {
+  const clean = text.trim();
+  if (!/^-?\d+$/.test(clean)) throw new Error("The limit must be a whole number");
+  const value = BigInt(clean);
+  if (value < INT128_MIN || value > INT128_MAX) throw new Error("The limit is outside the range of a 128-bit integer");
+  return value;
+}
 
 export interface RuleInput {
   contract: string;
@@ -56,6 +70,8 @@ export function argConstraintScVal(constraint: ArgConstraintInput): xdr.ScVal {
       return variant("SelfAddress");
     case "exact":
       return variant("Exact", xdr.ScVal.scvBytes(constraint.value.toXDR()));
+    case "lessThan":
+      return variant("LessThan", nativeToScVal(constraint.limit, { type: "i128" }));
   }
 }
 
@@ -96,7 +112,9 @@ export function messageSignatureScVal(rawPublicKey: Uint8Array, signature: Uint8
 export type ArgConstraintView =
   | { kind: "any" }
   | { kind: "self" }
-  | { kind: "exact"; display: string; /** XDR of the required value, hex-encoded. */ xdrHex: string };
+  | { kind: "exact"; display: string; /** XDR of the required value, hex-encoded. */ xdrHex: string }
+  /** The argument must be an integer below `limit` (a decimal string, since it can exceed 2^53). */
+  | { kind: "lessThan"; limit: string };
 
 export interface RuleView {
   contract: string;
@@ -122,12 +140,13 @@ function describeExact(xdrBytes: Uint8Array): string {
 }
 
 function parseConstraint(native: unknown): ArgConstraintView {
-  const [name, payload] = native as [string, Uint8Array | undefined];
+  const [name, payload] = native as [string, Uint8Array | bigint | undefined];
   if (name === "Any") return { kind: "any" };
   if (name === "SelfAddress") return { kind: "self" };
-  if (name === "Exact" && payload) {
+  if (name === "Exact" && payload instanceof Uint8Array) {
     return { kind: "exact", display: describeExact(payload), xdrHex: Buffer.from(payload).toString("hex") };
   }
+  if (name === "LessThan" && typeof payload === "bigint") return { kind: "lessThan", limit: payload.toString() };
   throw new Error(`Unknown argument constraint ${String(name)}`);
 }
 
@@ -151,7 +170,9 @@ export function parseSignerPolicy(native: unknown): SignerPolicyView {
 
 /** Human-readable constraint list, e.g. `claim(this account)` or `withdraw(this account, any)`. */
 export function describeRule(rule: RuleView): string {
-  const args = rule.args.map((a) => (a.kind === "self" ? "this account" : a.kind === "any" ? "any" : `= ${a.display}`));
+  const args = rule.args.map((a) =>
+    a.kind === "self" ? "this account" : a.kind === "any" ? "any" : a.kind === "lessThan" ? `< ${a.limit}` : `= ${a.display}`,
+  );
   return `${rule.function}(${args.join(", ")})`;
 }
 
@@ -175,6 +196,24 @@ function addressOf(value: xdr.ScVal): string | null {
   }
 }
 
+/** An integer argument of any integer type as a bigint; null for other types and for a u128 that does not fit an i128. */
+export function integerArg(value: xdr.ScVal): bigint | null {
+  switch (value.type) {
+    case "scvU32":
+    case "scvI32":
+    case "scvU64":
+    case "scvI64":
+    case "scvI128":
+      return BigInt(scValToNative(value) as number | bigint);
+    case "scvU128": {
+      const big = BigInt(scValToNative(value) as bigint);
+      return big <= INT128_MAX ? big : null;
+    }
+    default:
+      return null;
+  }
+}
+
 /** Why `args` do not satisfy `rule`, or null when they do. */
 function mismatch(rule: RuleView, args: xdr.ScVal[], account: string): string | null {
   if (rule.args.length !== args.length) {
@@ -186,6 +225,11 @@ function mismatch(rule: RuleView, args: xdr.ScVal[], account: string): string | 
     }
     if (constraint.kind === "exact" && Buffer.from(args[i].toXDR()).toString("hex") !== constraint.xdrHex) {
       return `argument ${i + 1} must equal ${constraint.display}`;
+    }
+    if (constraint.kind === "lessThan") {
+      const value = integerArg(args[i]);
+      if (value === null) return `argument ${i + 1} must be an integer below ${constraint.limit}`;
+      if (value >= BigInt(constraint.limit)) return `argument ${i + 1} must be less than ${constraint.limit}, this call has ${value}`;
     }
   }
   return null;

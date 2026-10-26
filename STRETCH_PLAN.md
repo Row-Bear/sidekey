@@ -357,6 +357,27 @@ locally before sending, accepts base64 or hex, and catches the base64 trap with 
   positions and emissions for the Blent contracts were looked at (their pool is Blend-like, the backstop has
   tiers) but not built.
 
+- Policy editor additions: expiry in **hours and days** (converted to minutes; a warning beyond 30 days, because
+  the policy's instance storage is only refreshed by policy changes), a **"less than"** argument constraint,
+  and a warning when a rule for the same function already exists (rules are alternatives).
+  - Contract: `ArgConstraint::LessThan(i128)` (last variant, so existing encodings are unchanged): the argument
+    must be an integer of any integer type strictly below the limit; other types never match; a `u128` above
+    `i128::MAX` is not below it; no lower bound. `version()` returns 3 as a capability probe. 65 contract tests
+    (11 new, plus the version check); 11 deliberate breaks of the logic were all caught.
+  - Core: encoding, parsing, description (`< 100`), the preview (mirrors the contract), `parseLimit` (whole
+    numbers within the i128 range) and `accountFeatures`; 12 new tests, 12 breaks caught.
+  - Finding: an account deployed before this change **accepts** a `LessThan` rule at registration (Soroban
+    decodes a rule's constraints lazily) and only fails when a matching call is evaluated, so it fails closed but
+    gives no explanation. Hence the `version()` probe: the editor greys the option out for older accounts and
+    `runPolicyOp` refuses the rule before sending anything.
+  - Verified on testnet (`npm run e2e:lessthan`, a new account from the new wasm): a delegate `transfer` of
+    9,999,999 and 5,000,000 stroops succeeds, exactly 10,000,000 and 20,000,000 are refused with `NotAllowed #3`,
+    the dashboard's preview agrees in all four, the rule reads back as `transfer(this account, any, < 10000000)`,
+    and the older account refuses it up front. Also checked in the dashboard: option disabled on an older
+    account, enabled on a new one, and a 2-day rule registered through the editor. `npm run e2e:wallet` still
+    passes on the new wasm. Existing smart accounts keep their old wasm (no upgrade function), so they cannot
+    take the new constraint.
+
 ## Suggested cut line
 
 About 12 hours in total. If time is short, the value order is:

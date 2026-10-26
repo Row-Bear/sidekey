@@ -18,6 +18,7 @@
     "e2e:broker": "tsx spikes/broker/run.ts",
     "e2e:wallet": "tsx spikes/broker/wallet-mode.ts",
     "e2e:passkey": "tsx spikes/broker/passkey-mode.ts",
+    "e2e:lessthan": "tsx spikes/less-than/run.ts",
     "deploy:account": "tsx scripts/02-deploy-smart-account.ts",
     "poc": "tsx scripts/03-run-poc.ts",
     "export:run": "tsx scripts/04-export-run.ts"

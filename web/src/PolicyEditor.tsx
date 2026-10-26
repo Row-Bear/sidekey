@@ -8,13 +8,17 @@ import { SignWith } from "./SignWith";
 const LEDGERS_PER_MINUTE = 12;
 const OTHER = "other";
 
-type ExpiryKind = "none" | "minutes" | "ledger";
+type ExpiryKind = "none" | "minutes" | "hours" | "days" | "ledger";
+
+const MINUTES_PER: Record<"minutes" | "hours" | "days", number> = { minutes: 1, hours: 60, days: 1440 };
+/** The account's stored policy lives about this long after the last policy change (see the contract's TTL). */
+const STORAGE_LIFETIME_MINUTES = 30 * 1440;
 
 function toExpiry(kind: ExpiryKind, value: string): ExpiryInput | null {
   if (kind === "none") return { kind: "none" };
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return null;
-  return kind === "minutes" ? { kind: "minutes", minutes: n } : { kind: "ledger", ledger: Math.floor(n) };
+  return kind === "ledger" ? { kind: "ledger", ledger: Math.floor(n) } : { kind: "minutes", minutes: n * MINUTES_PER[kind] };
 }
 
 export function PolicyEditor({ demo = true, data, busy, contract, functions, loading, nameOf, onApply }: {
@@ -58,8 +62,9 @@ export function PolicyEditor({ demo = true, data, busy, contract, functions, loa
   const selected = data?.signers.find((s) => s.id === choice) ?? null;
   const expiry = toExpiry(expiryKind, expiryValue);
   const latest = data?.latestLedger ?? 0;
-  const exactMissing = constraints.some((c) => c.kind === "exact" && !(c.value ?? "").trim());
-  const canAllow = !busy && signerRef !== "" && fn !== null && expiry !== null && !exactMissing;
+  const valueMissing = constraints.some((c) => (c.kind === "exact" || c.kind === "lessThan") && !(c.value ?? "").trim());
+  const limitInvalid = constraints.some((c) => c.kind === "lessThan" && (c.value ?? "").trim() !== "" && !/^-?\d+$/.test((c.value ?? "").trim()));
+  const canAllow = !busy && signerRef !== "" && fn !== null && expiry !== null && !valueMissing && !limitInvalid;
   const registered = selected?.registered ?? false;
 
   const setConstraint = (i: number, patch: Partial<ConstraintInput>) =>
@@ -140,6 +145,11 @@ export function PolicyEditor({ demo = true, data, busy, contract, functions, loa
             <select value={constraint.kind} onChange={(e) => setConstraint(i, { kind: e.target.value as ConstraintInput["kind"] })}>
               <option value="any">any value</option>
               {arg.kind === "address" && <option value="self">this account</option>}
+              {arg.kind === "integer" && (
+                <option value="lessThan" disabled={data?.features.lessThan === false}>
+                  less than…{data?.features.lessThan === false ? " (needs a newer smart account)" : ""}
+                </option>
+              )}
               <option value="exact">exactly…</option>
             </select>
             {constraint.kind === "exact" && (
@@ -149,6 +159,23 @@ export function PolicyEditor({ demo = true, data, busy, contract, functions, loa
                 onChange={(value) => setConstraint(i, { value })}
                 account={data?.smartAccount ?? ""}
               />
+            )}
+            {constraint.kind === "lessThan" && (
+              <>
+                <ArgInput
+                  arg={{ ...arg, name: "limit" }}
+                  value={constraint.value ?? ""}
+                  onChange={(value) => setConstraint(i, { value })}
+                  account={data?.smartAccount ?? ""}
+                />
+                <span className="muted hint">
+                  The value must be strictly below this limit (it sets no lower bound). Only smart accounts created after this
+                  option existed can enforce it.
+                </span>
+                {(constraint.value ?? "").trim() !== "" && !/^-?\d+$/.test((constraint.value ?? "").trim()) && (
+                  <span className="error small">The limit must be a whole number</span>
+                )}
+              </>
             )}
           </div>
         );
@@ -160,6 +187,8 @@ export function PolicyEditor({ demo = true, data, busy, contract, functions, loa
           <select value={expiryKind} onChange={(e) => setExpiryKind(e.target.value as ExpiryKind)}>
             <option value="none">No expiry</option>
             <option value="minutes">In N minutes</option>
+            <option value="hours">In N hours</option>
+            <option value="days">In N days</option>
             <option value="ledger">At ledger</option>
           </select>
           {expiryKind !== "none" && (
@@ -172,11 +201,27 @@ export function PolicyEditor({ demo = true, data, busy, contract, functions, loa
             />
           )}
         </span>
-        {expiryKind === "minutes" && expiry?.kind === "minutes" && (
-          <span className="muted hint">About ledger {(latest + Math.round(expiry.minutes * LEDGERS_PER_MINUTE)).toLocaleString("en-US")}</span>
+        {expiry?.kind === "minutes" && (
+          <span className="muted hint">
+            About ledger {(latest + Math.round(expiry.minutes * LEDGERS_PER_MINUTE)).toLocaleString("en-US")}, around{" "}
+            {new Date(Date.now() + expiry.minutes * 60_000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+          </span>
+        )}
+        {expiry?.kind === "minutes" && expiry.minutes > STORAGE_LIFETIME_MINUTES && (
+          <span className="warn small">
+            That is beyond about 30 days. The account's stored policy lasts about 30 days after the last policy change, so
+            the signer may stop working before this expiry unless the policy is changed again.
+          </span>
         )}
         {expiry === null && <span className="error small">Enter a number greater than zero</span>}
       </div>
+
+      {fn && selected?.policy?.rules.some((r) => r.contract === contract.trim() && r.function === fn.name) && (
+        <span className="warn small">
+          This signer already has a rule for {fn.name}() on this contract. A new rule is added next to it, and a call is
+          allowed if any rule matches, so remove the old rule above to replace it.
+        </span>
+      )}
 
       {demo && <SignWith value={via} onChange={setVia} disabled={busy} />}
 

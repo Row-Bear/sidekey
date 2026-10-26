@@ -17,6 +17,7 @@ import {
   contractFunctions,
   CORE_STEP_COUNT,
   createFreshDemoAccount,
+  accountFeatures,
   createWalletAccount,
   loadWalletAccount,
   readRecordedAccounts,
@@ -92,7 +93,7 @@ function parsePolicyOp(body: unknown): PolicyOp {
     case "allow": {
       const constraints = p.constraints;
       const valid = Array.isArray(constraints) && constraints.every((c) =>
-        c && ["any", "self", "exact"].includes(c.kind) && (c.value === undefined || isText(c.value)));
+        c && ["any", "self", "exact", "lessThan"].includes(c.kind) && (c.value === undefined || isText(c.value)));
       if (!isText(p.contract) || !isText(p.function) || !valid) {
         throw new Error("Invalid policy edit: allow needs contract, function and a list of constraints");
       }
@@ -384,13 +385,14 @@ export function demoApi(repoRoot: string): Plugin {
           if (req.method === "GET" && path === "/signers") {
             const ctx = currentContext();
             const demoDelegate = new URL(req.url ?? "", "http://localhost").searchParams.get("demo") !== "0";
-            const [signers, ledger] = await Promise.all([listSigners(ctx, { demoDelegate }), latestLedger(ctx)]);
+            const [signers, ledger, features] = await Promise.all([listSigners(ctx, { demoDelegate }), latestLedger(ctx), accountFeatures(ctx)]);
             return json(res, 200, {
               smartAccount: ctx.smartAccountId,
               simulator: ctx.simId,
               nativeToken: ctx.nativeId,
               master: ctx.master.publicKey(),
               latestLedger: ledger,
+              features,
               signers,
             });
           }
