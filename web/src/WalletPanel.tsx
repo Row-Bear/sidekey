@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import type { DemoState, RunRequest } from "./api-types";
-import { accountUrl, fetchRecordedAccounts, fetchWalletStatus, formatXlm, loadWalletAccount, setMasterMode, shortAddress, type WalletStatus } from "./api";
+import { accountUrl, formatXlm, loadWalletAccount, setMasterMode, shortAddress } from "./api";
 import { CopyButton } from "./CopyButton";
 import { Spinner } from "./Spinner";
+import { useWalletAccounts } from "./useWalletAccounts";
 import type { useWallet } from "./wallet";
 
 type Wallet = ReturnType<typeof useWallet>;
@@ -31,39 +32,14 @@ export function WalletPanel({ embedded = false, demo = true, wallet, state, busy
 }) {
   const { connection } = wallet;
   const Wrapper = embedded ? "div" : "section";
-  const [status, setStatus] = useState<WalletStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [recorded, setRecorded] = useState<string[]>([]);
   // The account chosen in the picker: the active one until the user picks another or "other" to paste an id.
   const [selected, setSelected] = useState("");
   const [pasted, setPasted] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (!connection) return setStatus(null);
-    let cancelled = false;
-    fetchWalletStatus(connection.address)
-      .then((s) => !cancelled && setStatus(s))
-      .catch(() => !cancelled && setStatus(null));
-    return () => {
-      cancelled = true;
-    };
-  }, [connection?.address, version]);
-
   // A message about one wallet does not belong to the next.
   useEffect(() => setError(null), [connection?.address]);
-
-  // Accounts the wallet's own account records on chain; they follow the wallet to any browser.
-  useEffect(() => {
-    if (!connection) return setRecorded([]);
-    let cancelled = false;
-    fetchRecordedAccounts(connection.address)
-      .then((r) => !cancelled && setRecorded(r.accounts.map((a) => a.smartAccountId)))
-      .catch(() => !cancelled && setRecorded([]));
-    return () => {
-      cancelled = true;
-    };
-  }, [connection?.address, version]);
 
   const switchMode = async (mode: "demo" | "wallet") => {
     setError(null);
@@ -89,24 +65,11 @@ export function WalletPanel({ embedded = false, demo = true, wallet, state, busy
     }
   };
 
-  const owned = connection !== null && state.wallet?.address === connection.address;
-  const currentId = owned && state.wallet ? state.wallet.smartAccountId : "";
-  const currentRecorded = currentId !== "" && recorded.includes(currentId);
-  // The active account, then the other on-chain entries, then the ones only this dashboard remembers.
-  const choices = connection
-    ? [...new Set([...(currentId ? [currentId] : []), ...recorded, ...state.knownAccounts.filter((a) => a.address === connection.address).map((a) => a.smartAccountId)])].map((id) => ({
-        id,
-        onChain: recorded.includes(id),
-      }))
-    : [];
+  const { status, recorded, owned, currentId, currentRecorded, choices, wrongWallet, offTestnet, creating } = useWalletAccounts(connection, state, version);
   const smartAccountToLoad = selected === OTHER ? pasted.trim() : selected;
-  // Creating shows a spinner for as long as the server is deploying.
-  const creating = busy && /^(Deploying|Creating)/.test(state.run.label ?? "");
 
   // The picker always shows the active account.
   useEffect(() => setSelected(currentId), [currentId]);
-  const wrongWallet = state.mode === "wallet" && state.wallet !== null && connection !== null && state.wallet.address !== connection.address;
-  const offTestnet = connection?.network.kind === "other";
 
   return (
     <Wrapper className={embedded ? "wallet-panel subpanel" : "card wallet-panel"}>

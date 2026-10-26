@@ -18,7 +18,9 @@ import { CallBuilder } from "./CallBuilder";
 import { CallHistory } from "./CallHistory";
 import { useAddressBook } from "./addressBook";
 import { ContractPicker } from "./ContractPicker";
+import { AccountPanel } from "./AccountPanel";
 import { Toast } from "./Toast";
+import { WalletChip } from "./WalletChip";
 import { useContractFunctions, useSigners } from "./hooks";
 import { PasskeyPanel } from "./PasskeyPanel";
 import { passkeySigner } from "./passkey";
@@ -378,11 +380,14 @@ export default function App({ variant }: { variant: Variant }) {
     <main>
       <header>
         <div>
-          <h1>Stellar Smart Account PoC</h1>
+          <h1>
+            Stellar Smart Account PoC
+            {!demo && <span className="tag ok" title="This app only works on the Stellar test network">testnet</span>}
+          </h1>
           <p className="muted">
             {demo
               ? "A Soroban smart account with a default G-address signer and a policy that lets a delegate call only specific functions on specific contracts. Stellar testnet."
-              : "Connect your wallet to own a Soroban smart account on Stellar testnet, set a signing policy for a delegate (a passkey or another key), and send calls as the master or the delegate."}
+              : "Own a smart account with your wallet, give a delegate limited permissions, and try calls."}
           </p>
         </div>
         <div className="controls">
@@ -399,6 +404,9 @@ export default function App({ variant }: { variant: Variant }) {
           <a className="nav-link" href={demo ? "/" : "/demo"}>
             {demo ? "← Policy tester" : "Guided demo →"}
           </a>
+          {!demo && state && (
+            <WalletChip wallet={wallet} state={state} busy={busy} version={signersVersion} onStart={(request) => void start(request)} />
+          )}
         </div>
       </header>
 
@@ -409,15 +417,20 @@ export default function App({ variant }: { variant: Variant }) {
         <>
           {state.run.label && <p className="banner running">{state.run.label}</p>}
           {state.run.lastError && <p className="error banner">{state.run.lastError}</p>}
-          {demo ? renderTopPanels(state, false) : <section className="card">{renderTopPanels(state, true)}</section>}
-          {!demo && !ready && (
-            <section className="card">
-              <h2>Get started</h2>
-              <p className="muted small">
-                Connect your wallet above, then create a smart account for it or load one you already have. The policy
-                editor and call builder appear once a smart account is active.
-              </p>
-            </section>
+          {demo ? (
+            renderTopPanels(state, false)
+          ) : (
+            <AccountPanel
+              wallet={wallet}
+              state={state}
+              busy={busy}
+              version={signersVersion}
+              onStart={(request) => void start(request)}
+              onChanged={() => {
+                void refresh();
+                setSignersVersion((v) => v + 1);
+              }}
+            />
           )}
           {(demo || ready) && (
             <>
@@ -453,13 +466,8 @@ export default function App({ variant }: { variant: Variant }) {
                 <p className="muted small">
                   {wallet.connection
                     ? `This smart account belongs to ${state.wallet ? shortAddress(state.wallet.address) : "another wallet"}. Connect that wallet to edit its policy.`
-                    : "Connect the wallet that owns this smart account to edit its policy."}
+                    : "Connect the wallet that owns this smart account (button at the top) to edit its policy."}
                 </p>
-                {!wallet.connection && (
-                  <button disabled={wallet.connecting} onClick={() => void wallet.connect()}>
-                    {wallet.connecting ? "Connecting…" : "Connect wallet"}
-                  </button>
-                )}
               </section>
             )}
             <CallBuilder demo={demo} walletReady={walletOwns} data={signersData} busy={busy} version={signersVersion} contract={contract} onContractChange={setContract} functions={contractFunctions.functions} loading={contractFunctions.loading} nameOf={book.nameOf} onSend={(call, via) => void start({ action: "call", call, via })} />

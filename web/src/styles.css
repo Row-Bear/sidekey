@@ -36,6 +36,31 @@ button.ghost { background: transparent; color: var(--accent); padding: 5px 12px;
 .contract-row select { flex: 1; min-width: 0; }
 .contract-row .field-label { flex: none; }
 .raw-error { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); word-break: break-word; }
+.controls { align-items: center; }
+.menu { position: relative; }
+.chip-btn { background: transparent; color: var(--text); border-color: var(--border); padding: 7px 12px; display: inline-flex; align-items: center; gap: 8px; }
+.chip-btn:hover { border-color: var(--accent); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.dot.ok { background: var(--ok); }
+.dot.warn { background: var(--warn); }
+.dot.bad { background: var(--bad); }
+.menu-panel {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; width: 280px; display: grid; gap: 10px; padding: 14px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.menu-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.menu-panel p { margin: 0; }
+.info { cursor: help; color: var(--muted); font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.info:hover, .info:focus { color: var(--accent); outline: none; }
+.account-card { display: grid; gap: 12px; }
+.account-card .section-head { margin-bottom: 0; }
+.account-card p { margin: 0; }
+.account-card .actions { align-items: center; }
+.account-card .grow { flex: 1; min-width: 200px; }
+.empty-state { display: grid; gap: 12px; justify-items: start; }
+.delegate-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.delegate-row .field-label { flex: none; }
+.delegate-row > button { margin-left: auto; }
 .log-card summary { cursor: pointer; color: var(--muted); font-weight: 600; }
 .log-card[open] summary { margin-bottom: 10px; }
 .policy-table .rules { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
