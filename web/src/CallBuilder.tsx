@@ -10,7 +10,7 @@ import { defaultFunction, describeSignature } from "./functions";
 import { Info } from "./Info";
 import { delegatesFirst } from "./signers";
 import { examplesFor } from "./examples";
-import { autoCallName, MAX_CALL_LABEL } from "./savedCalls";
+import { autoCallName } from "./savedCalls";
 
 function signerOptionLabel(signer: SignerView, latestLedger: number, demo: boolean): string {
   if (signer.label === "master") return `master ${shortAddress(signer.address)}: may authorize anything`;
@@ -25,7 +25,8 @@ function signerOptionLabel(signer: SignerView, latestLedger: number, demo: boole
   return `${signer.label} ${shortAddress(signer.address)}: ${state}${signer.hasKey || !demo ? "" : " (no key in demo mode)"}`;
 }
 
-function PreviewBox({ preview }: { preview: PreviewResult | "loading" | null }) {
+function PreviewBox({ preview }: { preview: PreviewResult | "loading" | "sent" | null }) {
+  if (preview === "sent") return <div className="verdict muted">Call sent. The preview returns when you change the call.</div>;
   if (preview === null) return <div className="verdict muted">Choose a function to preview the policy check.</div>;
   if (preview === "loading") return <div className="verdict muted">Checking the policy…</div>;
   const tree = preview.status === "allowed" || preview.status === "rejected" ? preview.tree : [];
@@ -83,8 +84,9 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   const [preview, setPreview] = useState<PreviewResult | "loading" | null>(null);
   const [via, setVia] = useState<SigningVia | "demo">(demo ? "demo" : "browser");
   const presetArgs = useRef<string[] | null>(null);
-  const [saveName, setSaveName] = useState<string | null>(null);
   const [saveError, setSaveError] = useState("");
+  // The call just sent: until it changes, a failing preview is not shown (e.g. nothing left to claim right after claim()).
+  const [sentKey, setSentKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (data && signerId === "") setSignerId(data.signers.find((s) => s.label === "delegate")?.id ?? "master");
@@ -111,6 +113,12 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
   const orderedSigners = data ? [...data.signers.filter((s) => s.label === "master"), ...delegatesFirst(data.signers, data.latestLedger)] : [];
   const request: CallRequest | null = fn && signerId ? { contract: contract.trim(), function: fn.name, args, signer: signerId } : null;
   const requestKey = useDebounced(JSON.stringify(request), 700);
+
+  useEffect(() => setSaveError(""), [requestKey]);
+
+  useEffect(() => {
+    if (sentKey !== null && requestKey !== sentKey) setSentKey(null);
+  }, [requestKey, sentKey]);
 
   useEffect(() => {
     if (requestKey === "null") return setPreview(null);
@@ -190,40 +198,33 @@ export function CallBuilder({ demo = true, walletReady = true, data, busy, versi
 
       {demo && <SignWith value={via} onChange={setVia} disabled={busy} />}
 
-      <PreviewBox preview={preview} />
+      <PreviewBox preview={preview !== "loading" && preview?.status === "simulation-failed" && requestKey === sentKey ? "sent" : preview} />
 
       <div className="actions">
-        <button disabled={!canSend} onClick={() => request && onSend(request, via === "browser" ? "browser" : undefined)}>
+        <button disabled={!canSend} onClick={() => {
+          if (!request) return;
+          setSentKey(JSON.stringify(request));
+          onSend(request, via === "browser" ? "browser" : undefined);
+        }}>
           {busy ? "Working…" : rejected ? "Send anyway (expect a rejection)" : "Send"}
         </button>
         {onSave && (
-          <button type="button" className="ghost" disabled={request === null || busy} onClick={() => { setSaveError(""); setSaveName(request ? autoCallName(request.function, nameOf(request.contract)) : ""); }}>
+          <button type="button" className="ghost" disabled={request === null || busy || (preview !== "loading" && preview?.status === "invalid")} onClick={() => {
+              if (!request) return;
+              try {
+                onSave(autoCallName(request.function, nameOf(request.contract)), request);
+                setSaveError("");
+              } catch (err) {
+                setSaveError(err instanceof Error ? err.message : String(err));
+              }
+            }}>
             Save call
           </button>
         )}
         {demo && signer && !signer.hasKey && !signer.viaBrowser && via !== "browser" && <span className="muted small">This demo holds no key for that signer.</span>}
+        {saveError && <span className="error small">{saveError}</span>}
         {signer?.viaBrowser && <span className="muted small">{signer.kind === "passkey" ? "Signed with your passkey." : "Signed in your wallet."}</span>}
       </div>
-      {onSave && saveName !== null && (
-        <form
-          className="save-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!request) return;
-            try {
-              onSave(saveName, request);
-              setSaveName(null);
-            } catch (err) {
-              setSaveError(err instanceof Error ? err.message : String(err));
-            }
-          }}
-        >
-          <input autoFocus value={saveName} maxLength={MAX_CALL_LABEL} aria-label="Name for the saved call" onChange={(e) => setSaveName(e.target.value)} />
-          <button type="submit">Save</button>
-          <button type="button" className="ghost" onClick={() => setSaveName(null)}>Cancel</button>
-          {saveError && <span className="error small">{saveError}</span>}
-        </form>
-      )}
     </section>
   );
 }

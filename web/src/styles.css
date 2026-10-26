@@ -275,5 +275,3 @@ textarea { font: inherit; font-size: 13px; color: var(--text); background: #0d11
 .saved-tools { display: flex; flex-direction: column; }
 .icon-btn { background: transparent; color: var(--muted, #8b949e); border: 0; padding: 0 4px; font-size: 12px; line-height: 1.4; }
 .icon-btn:hover { color: var(--text); }
-.save-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
-.save-form input { flex: 1; min-width: 140px; }

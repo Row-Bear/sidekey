@@ -443,7 +443,7 @@ function's full signature, so a same-named function on another contract gets fre
 
 ## Saved calls (plain page)
 
-The call builder's "Save call" stores the built call (contract, function, arguments, signer) under
+The call builder's "Save call" saves the built call as a card at once (named after the function; rename it on the card) (contract, function, arguments, signer) under
 the active smart account, in browser localStorage, up to 6 per account. Cards above the signing
 policy send a saved call in one click (the signing prompt still appears); each card can be renamed
 or removed. Logic and tests: `web/src/savedCalls.ts`.
